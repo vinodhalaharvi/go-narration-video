@@ -18,6 +18,10 @@ type ScheduleEntry struct {
 	StartSec float64 `json:"startSec"`
 }
 
+type Meta struct {
+	DurationSec float64 `json:"durationSec"`
+}
+
 type Word struct {
 	Word  string
 	Start float64
@@ -161,9 +165,17 @@ func main() {
 	os.MkdirAll("src", 0755)
 	scheduleBytes, _ := json.MarshalIndent(schedule, "", "  ")
 	os.WriteFile("src/schedule.json", scheduleBytes, 0644)
+
+	// Write meta.json with audio duration so Root.tsx sizes the video to fit narration.
+	// Add 0.5s tail buffer so the last word isn't cut off and audio fully decays.
+	meta := Meta{DurationSec: transcriptResp.Duration + 0.5}
+	metaBytes, _ := json.MarshalIndent(meta, "", "  ")
+	os.WriteFile("src/meta.json", metaBytes, 0644)
+
 	fmt.Printf("✓ schedule:\n")
 	for _, s := range schedule {
 		fmt.Printf("   line %d at %.2fs\n", s.Line, s.StartSec)
 	}
+	fmt.Printf("✓ duration: %.2fs (video will end here)\n", meta.DurationSec)
 }
 

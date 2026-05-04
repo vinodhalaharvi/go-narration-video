@@ -58,11 +58,13 @@ check:  ## Verify environment is set up correctly
 # ========================================
 audio: check  ## Generate narration MP3 + schedule from script.txt
 	@echo "$(CYAN)→ Running Go pipeline (TTS + Whisper + schedule)...$(RESET)"
-	@go run main.go
+	@go run ./cmd/build
 
-render:  ## Render MP4 from current schedule + audio (no regen)
-	@test -f $(AUDIO) || { echo "$(RED)✗ Missing $(AUDIO) — run 'make audio' first$(RESET)"; exit 1; }
-	@test -f $(SCHEDULE) || { echo "$(RED)✗ Missing $(SCHEDULE) — run 'make audio' first$(RESET)"; exit 1; }
+render:  ## Render MP4 (auto-generates audio/schedule/meta if missing)
+	@if [ ! -f $(AUDIO) ] || [ ! -f $(SCHEDULE) ] || [ ! -f src/meta.json ]; then \
+		echo "$(YELLOW)⚠ Missing audio/schedule/meta — generating first...$(RESET)"; \
+		$(MAKE) audio; \
+	fi
 	@echo "$(CYAN)→ Rendering $(COMPOSITION) → $(OUTPUT)...$(RESET)"
 	@rm -rf node_modules/.cache $(OUTPUT)
 	@npx remotion render $(COMPOSITION) $(OUTPUT)
@@ -98,7 +100,7 @@ new:  ## Set up walkthrough from a Go file: make new SRC=path/to/file.go
 	@test -n "$(SRC)" || { echo "$(RED)Usage: make new SRC=path/to/file.go$(RESET)"; exit 1; }
 	@test -f "$(SRC)" || { echo "$(RED)✗ $(SRC) not found$(RESET)"; exit 1; }
 	@echo "$(CYAN)→ Embedding $(SRC) into Composition.tsx...$(RESET)"
-	@./scripts/embed-go.py "$(SRC)"
+	@go run ./cmd/embed "$(SRC)"
 	@echo "$(GREEN)✓ Embedded. Now edit script.txt with [[line:N]] markers, then 'make build'$(RESET)"
 
 archive:  ## Save current build with a name: make archive NAME=functor-intro
