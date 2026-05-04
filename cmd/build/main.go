@@ -218,27 +218,29 @@ func main() {
 	}
 
 	// --- Generate audio ---
-	client := openai.NewClient(os.Getenv("OPENAI_API_KEY"))
-	resp, err := client.CreateSpeech(context.Background(), openai.CreateSpeechRequest{
-		Model: "gpt-4o-mini-tts",
-		Input: cleanText,
-		Voice: openai.VoiceNova,
-	})
+	tts, err := NewTTS()
+	if err != nil {
+		log.Fatalf("TTS setup failed: %v", err)
+	}
+	fmt.Printf("✓ using TTS: %s\n", tts.Name())
+
+	audioStream, err := tts.Synthesize(context.Background(), cleanText)
 	if err != nil {
 		log.Fatalf("TTS request failed: %v", err)
 	}
-	defer resp.Close()
+	defer audioStream.Close()
 
 	os.MkdirAll("public", 0755)
 	out, err := os.Create("public/narration.mp3")
 	if err != nil {
 		log.Fatal(err)
 	}
-	io.Copy(out, resp)
+	io.Copy(out, audioStream)
 	out.Close()
 	fmt.Println("✓ audio generated")
 
-	// --- Transcribe ---
+	// --- Transcribe (always uses OpenAI Whisper for word timestamps) ---
+	client := openai.NewClient(os.Getenv("OPENAI_API_KEY"))
 	transcriptResp, err := client.CreateTranscription(context.Background(), openai.AudioRequest{
 		Model:    openai.Whisper1,
 		FilePath: "public/narration.mp3",

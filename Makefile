@@ -1,5 +1,5 @@
 .DEFAULT_GOAL := help
-.PHONY: help install init audio render build short watch studio clean reset preview new add clear-walkthrough check open archive distclean
+.PHONY: help install init audio render build short voices rebuild-audio watch studio clean reset preview new add clear-walkthrough check open archive distclean
 
 # ========================================
 # Configuration
@@ -44,6 +44,11 @@ help:  ## Show this help
 	@echo "  edit walkthrough/script.txt — add [[title:Your Hook]] at top"
 	@echo "  keep narration under 60 seconds"
 	@echo "  make short && make open"
+	@echo ""
+	@echo "$(YELLOW)Voice selection:$(RESET)"
+	@echo "  make voices                            # list all options"
+	@echo "  make build VOICE=onyx                  # use OpenAI's onyx"
+	@echo "  make build PROVIDER=elevenlabs VOICE=adam"
 	@echo ""
 
 # ========================================
@@ -99,6 +104,47 @@ short:  ## Build a vertical short (1080x1920 with baked captions)
 	@rm -rf node_modules/.cache $(OUTPUT)
 	@npx remotion render $(COMPOSITION) $(OUTPUT)
 	@echo "$(GREEN)✓ Rendered $(OUTPUT) (vertical short)$(RESET)"
+
+# ========================================
+# Voice presets
+# Override with VOICE=name and/or PROVIDER=openai|elevenlabs
+# ========================================
+voices:  ## List available voice options
+	@echo ""
+	@echo "$(CYAN)OpenAI voices$(RESET) (PROVIDER=openai, default):"
+	@echo "  $(GREEN)nova$(RESET)    — female, warm, conversational (current default)"
+	@echo "  $(GREEN)sage$(RESET)    — female, measured, clear"
+	@echo "  $(GREEN)onyx$(RESET)    — male, deep, authoritative — popular for tech"
+	@echo "  $(GREEN)ash$(RESET)     — male, conversational"
+	@echo "  $(GREEN)verse$(RESET)   — male, dynamic"
+	@echo "  $(GREEN)coral$(RESET)   — female, friendly"
+	@echo "  $(GREEN)alloy$(RESET)   — neutral"
+	@echo "  $(GREEN)echo$(RESET)    — male, classic"
+	@echo "  $(GREEN)fable$(RESET)   — narrative"
+	@echo "  $(GREEN)shimmer$(RESET) — female, light"
+	@echo ""
+	@echo "$(CYAN)ElevenLabs voices$(RESET) (PROVIDER=elevenlabs, requires ELEVENLABS_API_KEY):"
+	@echo "  $(GREEN)adam$(RESET)    — male, warm — most popular for tech"
+	@echo "  $(GREEN)brian$(RESET)   — male, mature, deep"
+	@echo "  $(GREEN)rachel$(RESET)  — female, calm"
+	@echo "  $(GREEN)bella$(RESET)   — female, energetic"
+	@echo "  $(GREEN)antoni$(RESET)  — male, narrative"
+	@echo "  $(GREEN)charlie$(RESET) — male, casual"
+	@echo "  $(GREEN)daniel$(RESET)  — male, authoritative"
+	@echo "  $(GREEN)emily$(RESET)   — female, soft"
+	@echo "  $(GREEN)george$(RESET)  — male, mature"
+	@echo ""
+	@echo "$(YELLOW)Examples:$(RESET)"
+	@echo "  make build VOICE=onyx"
+	@echo "  make build PROVIDER=elevenlabs VOICE=adam"
+	@echo "  make build PROVIDER=elevenlabs VOICE=brian"
+	@echo "  make rebuild-audio VOICE=sage   # regenerate just audio without rebuilding video"
+	@echo ""
+
+rebuild-audio: check  ## Regenerate audio with a different voice (keeps existing render setup)
+	@echo "$(CYAN)→ Regenerating audio (VOICE=$$VOICE PROVIDER=$$PROVIDER)...$(RESET)"
+	@go run ./cmd/build
+	@echo "$(GREEN)✓ Audio regenerated. Run 'make render' to update video.$(RESET)"
 
 # ========================================
 # Iteration helpers
