@@ -5,6 +5,8 @@ node_modules/
 out/
 *.mp4
 .remotion-cache/
+preview.png
+archive/
 
 # Generated audio
 public/narration.mp3
