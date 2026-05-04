@@ -1,7 +1,7 @@
 Here is a simple Go program that demonstrates a functor.
-[[line:4]] We define a generic Map function that takes a slice of A and a function from A to B.
-[[line:5]] Inside, we create an output slice of the right size.
-[[line:6]] Then we apply the function to each element and return.
-[[line:11]] In main, we create a slice of integers.
-[[line:14]] We map over it, squaring each number.
-[[line:16]] And we print the result.
+[[line:6]] We define a generic Map function that takes a slice of A and a function from A to B.
+[[line:7]] Inside, we create an output slice of the right size.
+[[line:9]] Then we apply the function to each element and return.
+[[line:14]] In main, we create a slice of integers.
+[[line:15]] We map over it, squaring each number.
+[[line:19]] And we print the result.

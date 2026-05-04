@@ -23,23 +23,19 @@ func main() {
     fmt.Println(squared)
 }`;
 
-const goLandTheme = {
-  plain: { color: '#A9B7C6', backgroundColor: '#2B2B2B' },
+const githubDarkTheme = {
+  plain: { color: '#C9D1D9', backgroundColor: '#0D1117' },
   styles: [
-    { types: ['comment'], style: { color: '#629755', fontStyle: 'italic' as const } },
-    { types: ['keyword'], style: { color: '#CC7832', fontWeight: 'bold' as const } },
-    { types: ['boolean'], style: { color: '#CC7832', fontWeight: 'bold' as const } },
-    { types: ['string', 'char'], style: { color: '#6A8759' } },
-    { types: ['number'], style: { color: '#6897BB' } },
-    { types: ['function'], style: { color: '#FFC66D' } },
-    { types: ['builtin'], style: { color: '#CC7832' } },
-    { types: ['class-name'], style: { color: '#FFC66D' } },
-    { types: ['constant'], style: { color: '#9876AA' } },
-    { types: ['punctuation'], style: { color: '#A9B7C6' } },
-    { types: ['operator'], style: { color: '#A9B7C6' } },
-    { types: ['variable'], style: { color: '#A9B7C6' } },
-    { types: ['property'], style: { color: '#9876AA' } },
-    { types: ['namespace'], style: { color: '#A9B7C6' } },
+    { types: ['comment', 'prolog', 'doctype', 'cdata'], style: { color: '#8B949E', fontStyle: 'italic' as const } },
+    { types: ['keyword', 'boolean', 'atrule'], style: { color: '#FF7B72' } },
+    { types: ['string', 'char', 'attr-value', 'regex'], style: { color: '#A5D6FF' } },
+    { types: ['number', 'symbol'], style: { color: '#79C0FF' } },
+    { types: ['function'], style: { color: '#D2A8FF' } },
+    { types: ['builtin'], style: { color: '#FF7B72' } },
+    { types: ['class-name', 'maybe-class-name', 'tag'], style: { color: '#FFA657' } },
+    { types: ['constant', 'property'], style: { color: '#79C0FF' } },
+    { types: ['punctuation', 'operator'], style: { color: '#C9D1D9' } },
+    { types: ['variable', 'namespace'], style: { color: '#C9D1D9' } },
   ],
 };
 
@@ -56,11 +52,11 @@ export const GoWalkthrough: React.FC = () => {
   const fontStack = 'Monaco, Menlo, "Courier New", monospace';
 
   return (
-    <AbsoluteFill style={{ backgroundColor: '#2B2B2B', fontFamily: fontStack }}>
+    <AbsoluteFill style={{ backgroundColor: '#0D1117', fontFamily: fontStack, color: '#C9D1D9' }}>
       <div
         style={{
           height: 36,
-          background: '#3C3F41',
+          background: '#161B22',
           color: '#BBBBBB',
           display: 'flex',
           alignItems: 'center',
@@ -79,8 +75,8 @@ export const GoWalkthrough: React.FC = () => {
             transition: 'transform 0.6s cubic-bezier(0.4, 0, 0.2, 1)',
           }}
         >
-          <Highlight theme={goLandTheme} code={goCode} language="go">
-            {({ tokens, getLineProps, getTokenProps }) => (
+          <Highlight theme={githubDarkTheme} code={goCode} language="go">
+            {({ tokens, getTokenProps }) => (
               <>
                 {tokens.map((line, i) => {
                   const lineNum = i + 1;
@@ -92,15 +88,15 @@ export const GoWalkthrough: React.FC = () => {
                         display: 'flex',
                         height: lineHeight,
                         alignItems: 'center',
-                        background: isActive ? 'rgba(255, 198, 109, 0.12)' : 'transparent',
+                        background: isActive ? 'rgba(88, 166, 255, 0.15)' : 'transparent',
                         borderLeft: isActive
-                          ? '3px solid #FFC66D'
+                          ? '3px solid #58A6FF'
                           : '3px solid transparent',
                       }}
                     >
                       <span
                         style={{
-                          color: isActive ? '#FFC66D' : '#606366',
+                          color: isActive ? '#58A6FF' : '#484F58',
                           width: 60,
                           textAlign: 'right',
                           paddingRight: 16,
@@ -117,6 +113,7 @@ export const GoWalkthrough: React.FC = () => {
                           fontFamily: fontStack,
                           fontSize: 22,
                           whiteSpace: 'pre',
+                          color: '#C9D1D9',
                         }}
                       >
                         {line.map((token, key) => (
@@ -136,4 +133,3 @@ export const GoWalkthrough: React.FC = () => {
     </AbsoluteFill>
   );
 };
-
