@@ -1,5 +1,5 @@
 .DEFAULT_GOAL := help
-.PHONY: help install audio render build watch studio clean reset preview new check open archive distclean
+.PHONY: help install init audio render build watch studio clean reset preview new check open archive distclean
 
 # ========================================
 # Configuration
@@ -36,12 +36,16 @@ help:  ## Show this help
 # ========================================
 # Setup
 # ========================================
-install:  ## Install all dependencies (npm + go modules)
+install: init  ## Install all dependencies (npm + go modules)
 	@echo "$(CYAN)→ Installing npm dependencies...$(RESET)"
 	@npm install
 	@echo "$(CYAN)→ Tidying Go modules...$(RESET)"
 	@go mod tidy
 	@echo "$(GREEN)✓ Dependencies installed$(RESET)"
+
+init:  ## Create placeholder generated files so the project compiles before first build
+	@test -f $(SCHEDULE) || echo '[{"line":1,"startSec":0}]' > $(SCHEDULE)
+	@test -f src/meta.json || echo '{"durationSec":5}' > src/meta.json
 
 check:  ## Verify environment is set up correctly
 	@echo "$(CYAN)Checking environment...$(RESET)"
@@ -60,9 +64,9 @@ audio: check  ## Generate narration MP3 + schedule from script.txt
 	@echo "$(CYAN)→ Running Go pipeline (TTS + Whisper + schedule)...$(RESET)"
 	@go run ./cmd/build
 
-render:  ## Render MP4 (auto-generates audio/schedule/meta if missing)
-	@if [ ! -f $(AUDIO) ] || [ ! -f $(SCHEDULE) ] || [ ! -f src/meta.json ]; then \
-		echo "$(YELLOW)⚠ Missing audio/schedule/meta — generating first...$(RESET)"; \
+render: init  ## Render MP4 (auto-generates audio/schedule/meta if missing)
+	@if [ ! -f $(AUDIO) ]; then \
+		echo "$(YELLOW)⚠ Missing audio — generating first...$(RESET)"; \
 		$(MAKE) audio; \
 	fi
 	@echo "$(CYAN)→ Rendering $(COMPOSITION) → $(OUTPUT)...$(RESET)"
