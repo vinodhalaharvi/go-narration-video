@@ -1,58 +1,139 @@
-// embed reads a Go source file and embeds its contents into
-// src/Composition.tsx as the goCode template literal.
+// embed copies one or more Go source files into walkthrough/ for the next build.
 //
-// Usage: go run ./cmd/embed path/to/file.go
+// Usage:
+//   go run ./cmd/embed file.go [more.go ...]
+//   go run ./cmd/embed --dir path/to/dir
+//   go run ./cmd/embed --clear
 package main
 
 import (
 	"fmt"
+	"io"
 	"log"
 	"os"
-	"regexp"
+	"path/filepath"
 	"strings"
 )
 
+const walkthroughDir = "walkthrough"
+
+func usage() {
+	fmt.Fprintln(os.Stderr, "Usage:")
+	fmt.Fprintln(os.Stderr, "  go run ./cmd/embed file.go [more.go ...]")
+	fmt.Fprintln(os.Stderr, "  go run ./cmd/embed --dir path/to/dir")
+	fmt.Fprintln(os.Stderr, "  go run ./cmd/embed --clear")
+	os.Exit(1)
+}
+
+func copyFile(src, dst string) error {
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+	out, err := os.Create(dst)
+	if err != nil {
+		return err
+	}
+	defer out.Close()
+	_, err = io.Copy(out, in)
+	return err
+}
+
+func clearWalkthrough() {
+	entries, err := os.ReadDir(walkthroughDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			fmt.Println("ℹ walkthrough/ doesn't exist — nothing to clear")
+			return
+		}
+		log.Fatal(err)
+	}
+	count := 0
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".go") {
+			continue
+		}
+		if err := os.Remove(filepath.Join(walkthroughDir, e.Name())); err != nil {
+			log.Fatal(err)
+		}
+		count++
+	}
+	fmt.Printf("✓ Removed %d .go file(s) from %s/\n", count, walkthroughDir)
+}
+
+func embedDir(dir string) []string {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		log.Fatalf("✗ Cannot read directory %q: %v", dir, err)
+	}
+	var goFiles []string
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		if strings.HasSuffix(e.Name(), ".go") {
+			goFiles = append(goFiles, filepath.Join(dir, e.Name()))
+		}
+	}
+	if len(goFiles) == 0 {
+		log.Fatalf("✗ No .go files in %q", dir)
+	}
+	return goFiles
+}
+
 func main() {
-	if len(os.Args) != 2 {
-		fmt.Fprintln(os.Stderr, "Usage: go run ./cmd/embed path/to/file.go")
-		os.Exit(1)
+	args := os.Args[1:]
+	if len(args) == 0 {
+		usage()
 	}
 
-	srcPath := os.Args[1]
-	compPath := "src/Composition.tsx"
-
-	srcBytes, err := os.ReadFile(srcPath)
-	if err != nil {
-		log.Fatalf("✗ Cannot read source file %q: %v", srcPath, err)
+	if args[0] == "--clear" {
+		clearWalkthrough()
+		return
 	}
 
-	compBytes, err := os.ReadFile(compPath)
-	if err != nil {
-		log.Fatalf("✗ Cannot read %q (run from project root?): %v", compPath, err)
+	var srcFiles []string
+	if args[0] == "--dir" {
+		if len(args) != 2 {
+			usage()
+		}
+		srcFiles = embedDir(args[1])
+	} else {
+		srcFiles = args
 	}
 
-	// Escape the Go code for embedding inside a JS template literal.
-	// Order matters: backslash first, then everything else.
-	goCode := string(srcBytes)
-	escaped := goCode
-	escaped = strings.ReplaceAll(escaped, `\`, `\\`)
-	escaped = strings.ReplaceAll(escaped, "`", "\\`")
-	escaped = strings.ReplaceAll(escaped, `${`, `\${`)
-
-	// Replace the existing `const goCode = `...`;` block.
-	// (?s) lets . match newlines; the [^`]* keeps it greedy-but-bounded.
-	pattern := regexp.MustCompile("(?s)const goCode = `[^`]*`;")
-	if !pattern.Match(compBytes) {
-		log.Fatalf("✗ Could not find 'const goCode = `...`;' in %s", compPath)
+	for _, f := range srcFiles {
+		info, err := os.Stat(f)
+		if err != nil {
+			log.Fatalf("✗ Cannot read %q: %v", f, err)
+		}
+		if info.IsDir() {
+			log.Fatalf("✗ %q is a directory — use --dir", f)
+		}
+		if !strings.HasSuffix(f, ".go") {
+			log.Fatalf("✗ %q is not a .go file", f)
+		}
 	}
 
-	replacement := "const goCode = `" + escaped + "`;"
-	newContent := pattern.ReplaceAllLiteralString(string(compBytes), replacement)
-
-	if err := os.WriteFile(compPath, []byte(newContent), 0644); err != nil {
-		log.Fatalf("✗ Cannot write %q: %v", compPath, err)
+	if err := os.MkdirAll(walkthroughDir, 0755); err != nil {
+		log.Fatal(err)
 	}
 
-	lineCount := strings.Count(goCode, "\n") + 1
-	fmt.Printf("✓ Embedded %s (%d lines) into %s\n", srcPath, lineCount, compPath)
+	for _, src := range srcFiles {
+		dst := filepath.Join(walkthroughDir, filepath.Base(src))
+		if err := copyFile(src, dst); err != nil {
+			log.Fatalf("✗ Cannot copy %s → %s: %v", src, dst, err)
+		}
+		data, _ := os.ReadFile(dst)
+		lineCount := strings.Count(string(data), "\n") + 1
+		fmt.Printf("✓ Copied %s (%d lines) → %s\n", src, lineCount, dst)
+	}
+
+	fmt.Println()
+	fmt.Println("Next:")
+	fmt.Println("  1. Edit walkthrough/script.txt with your narration")
+	fmt.Println("  2. Use [[file:NAME line:N]] markers to reference specific files")
+	fmt.Println("     Example: [[file:functor.go line:6]] We define the Map function")
+	fmt.Println("  3. Run: make build  (or 'make short' for vertical 9:16)")
 }

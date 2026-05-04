@@ -1,5 +1,5 @@
 Here is a simple Go program that demonstrates a functor.
-[[line:6]] We define a generic Map function that takes a slice of A and a function from A to B.
+[[file:functor.go line:6]] We define a generic Map function that takes a slice of A and a function from A to B.
 [[line:7]] Inside, we create an output slice of the right size.
 [[line:9]] Then we apply the function to each element and return.
 [[line:14]] In main, we create a slice of integers.

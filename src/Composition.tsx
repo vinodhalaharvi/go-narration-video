@@ -1,7 +1,11 @@
 import { AbsoluteFill, useCurrentFrame, useVideoConfig, Audio, staticFile, interpolate } from 'remotion';
 import { Highlight } from 'prism-react-renderer';
 import schedule from './schedule.json';
+import codeFiles from './codeFiles.json';
+import meta from './meta.json';
+import captions from './captions.json';
 
+// Legacy fallback if codeFiles.json is empty
 const goCode = `package main
 
 import "fmt"
@@ -39,76 +43,70 @@ const githubDarkTheme = {
   ],
 };
 
-export const GoWalkthrough: React.FC = () => {
-  const frame = useCurrentFrame();
-  const { fps } = useVideoConfig();
-  const currentSec = frame / fps;
+const filesMap: Record<string, string> =
+  Object.keys(codeFiles).length > 0
+    ? (codeFiles as Record<string, string>)
+    : { 'main.go': goCode };
 
-  const activeLine =
-    [...schedule].reverse().find((s) => currentSec >= s.startSec)?.line ?? 1;
+const fileNames = Object.keys(filesMap).sort();
 
-  const lineHeight = 36;
-  const fontStack = 'Monaco, Menlo, "Courier New", monospace';
+const isShort = meta.format === 'short';
 
-  // Build keyframes from schedule: at each scheduled second, where should the scroll be?
-  // First keyframe is forced to frame 0 so scroll starts settled (not animating in from below).
-  const rawKeyframes = schedule.map((s) => ({
+const LINE_HEIGHT = isShort ? 44 : 36;
+const CODE_FONT_SIZE = isShort ? 28 : 22;
+const LINE_NUM_FONT_SIZE = isShort ? 24 : 20;
+const HEADER_HEIGHT = 36;
+const TAB_HEIGHT = isShort ? 0 : 40;
+const FONT_STACK = 'Monaco, Menlo, "Courier New", monospace';
+const VISIBLE_LINE_OFFSET = isShort ? 5 : 8;
+
+const TITLE_FADE_IN_FRAMES = 6;
+const TITLE_HOLD_FRAMES = 60;
+const TITLE_FADE_OUT_FRAMES = 12;
+
+const CAPTION_BAND_HEIGHT = 200;
+const CAPTION_FONT_SIZE = 52;
+
+type Keyframe = { frame: number; scroll: number };
+
+function buildScrollTimeline(filename: string, fps: number): Keyframe[] {
+  const entries = schedule.filter((s) => s.file === filename);
+  const raw: Keyframe[] = entries.map((s) => ({
     frame: Math.round(s.startSec * fps),
-    scroll: Math.max(0, (s.line - 8) * lineHeight),
+    scroll: Math.max(0, (s.line - VISIBLE_LINE_OFFSET) * LINE_HEIGHT),
   }));
-
-  // Ensure first keyframe is at frame 0 (interpolate clamps before first input)
-  const keyframes =
-    rawKeyframes.length > 0 && rawKeyframes[0].frame > 0
-      ? [{ frame: 0, scroll: rawKeyframes[0].scroll }, ...rawKeyframes]
-      : rawKeyframes;
-
-  // Dedupe consecutive frames with the same value (interpolate requires strictly increasing)
-  const dedupedFrames: number[] = [];
-  const dedupedScrolls: number[] = [];
-  for (const k of keyframes) {
-    if (dedupedFrames.length === 0 || k.frame > dedupedFrames[dedupedFrames.length - 1]) {
-      dedupedFrames.push(k.frame);
-      dedupedScrolls.push(k.scroll);
+  if (raw.length > 0 && raw[0].frame > 0) {
+    raw.unshift({ frame: 0, scroll: raw[0].scroll });
+  }
+  const out: Keyframe[] = [];
+  for (const k of raw) {
+    if (out.length === 0 || k.frame > out[out.length - 1].frame) {
+      out.push(k);
     }
   }
+  return out;
+}
 
-  // Need at least 2 points for interpolate; if only one, pin scroll there
-  const scrollY =
-    dedupedFrames.length >= 2
-      ? interpolate(frame, dedupedFrames, dedupedScrolls, {
-          extrapolateLeft: 'clamp',
-          extrapolateRight: 'clamp',
-          easing: (t) =>
-            // ease-in-out cubic
-            t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2,
-        })
-      : (dedupedScrolls[0] ?? 0);
-
+const CodePanel: React.FC<{
+  filename: string;
+  code: string;
+  scrollY: number;
+  activeLine: number | null;
+  opacity: number;
+}> = ({ filename, code, scrollY, activeLine, opacity }) => {
   return (
-    <AbsoluteFill style={{ backgroundColor: '#0D1117', fontFamily: fontStack, color: '#C9D1D9' }}>
-      <div
-        style={{
-          height: 36,
-          background: '#161B22',
-          color: '#BBBBBB',
-          display: 'flex',
-          alignItems: 'center',
-          padding: '0 16px',
-          fontSize: 13,
-          borderBottom: '1px solid #1E1E1E',
-        }}
-      >
-        main.go
-      </div>
-
-      <div style={{ flex: 1, padding: '24px 0', overflow: 'hidden' }}>
-        <div
-          style={{
-            transform: `translateY(-${scrollY}px)`,
-          }}
-        >
-          <Highlight theme={githubDarkTheme} code={goCode} language="go">
+    <div
+      style={{
+        position: 'absolute',
+        inset: 0,
+        opacity,
+        transition: 'opacity 0.3s ease',
+        pointerEvents: 'none',
+      }}
+    >
+      <div style={{ flex: 1, padding: '24px 0', overflow: 'hidden', height: '100%' }}>
+        <div style={{ transform: `translateY(-${scrollY}px)` }}>
+          <Highlight theme={githubDarkTheme} code={code} language="go">
             {({ tokens, getTokenProps }) => (
               <>
                 {tokens.map((line, i) => {
@@ -116,10 +114,10 @@ export const GoWalkthrough: React.FC = () => {
                   const isActive = lineNum === activeLine;
                   return (
                     <div
-                      key={i}
+                      key={`${filename}-${i}`}
                       style={{
                         display: 'flex',
-                        height: lineHeight,
+                        height: LINE_HEIGHT,
                         alignItems: 'center',
                         background: isActive ? 'rgba(88, 166, 255, 0.15)' : 'transparent',
                         borderLeft: isActive
@@ -133,9 +131,9 @@ export const GoWalkthrough: React.FC = () => {
                           width: 60,
                           textAlign: 'right',
                           paddingRight: 16,
-                          fontSize: 20,
+                          fontSize: LINE_NUM_FONT_SIZE,
                           userSelect: 'none',
-                          fontFamily: fontStack,
+                          fontFamily: FONT_STACK,
                         }}
                       >
                         {lineNum}
@@ -143,8 +141,8 @@ export const GoWalkthrough: React.FC = () => {
                       <pre
                         style={{
                           margin: 0,
-                          fontFamily: fontStack,
-                          fontSize: 22,
+                          fontFamily: FONT_STACK,
+                          fontSize: CODE_FONT_SIZE,
                           whiteSpace: 'pre',
                           color: '#C9D1D9',
                         }}
@@ -161,6 +159,235 @@ export const GoWalkthrough: React.FC = () => {
           </Highlight>
         </div>
       </div>
+    </div>
+  );
+};
+
+const TabBar: React.FC<{ activeFile: string }> = ({ activeFile }) => {
+  if (fileNames.length <= 1 || isShort) return null;
+  return (
+    <div
+      style={{
+        height: TAB_HEIGHT,
+        background: '#161B22',
+        display: 'flex',
+        alignItems: 'flex-end',
+        borderBottom: '1px solid #30363D',
+        paddingLeft: 16,
+        flexShrink: 0,
+      }}
+    >
+      {fileNames.map((name) => {
+        const isActive = name === activeFile;
+        return (
+          <div
+            key={name}
+            style={{
+              padding: '8px 18px',
+              fontFamily: FONT_STACK,
+              fontSize: 14,
+              color: isActive ? '#C9D1D9' : '#7D8590',
+              background: isActive ? '#0D1117' : 'transparent',
+              borderTop: isActive ? '2px solid #58A6FF' : '2px solid transparent',
+              borderLeft: '1px solid #30363D',
+              borderRight: '1px solid #30363D',
+              transition: 'all 0.3s ease',
+              marginRight: -1,
+            }}
+          >
+            {name}
+          </div>
+        );
+      })}
+    </div>
+  );
+};
+
+const TitleOverlay: React.FC<{ frame: number }> = ({ frame }) => {
+  if (!isShort || !meta.title) return null;
+  const fadeInEnd = TITLE_FADE_IN_FRAMES;
+  const fadeOutStart = fadeInEnd + TITLE_HOLD_FRAMES;
+  const fadeOutEnd = fadeOutStart + TITLE_FADE_OUT_FRAMES;
+  if (frame > fadeOutEnd) return null;
+
+  const opacity = interpolate(
+    frame,
+    [0, fadeInEnd, fadeOutStart, fadeOutEnd],
+    [0, 1, 1, 0],
+    { extrapolateLeft: 'clamp', extrapolateRight: 'clamp' }
+  );
+
+  return (
+    <div
+      style={{
+        position: 'absolute',
+        top: '20%',
+        left: 0,
+        right: 0,
+        display: 'flex',
+        justifyContent: 'center',
+        opacity,
+        pointerEvents: 'none',
+        zIndex: 10,
+      }}
+    >
+      <div
+        style={{
+          background: 'rgba(13, 17, 23, 0.92)',
+          color: '#FFA657',
+          padding: '20px 36px',
+          borderRadius: 12,
+          fontSize: 56,
+          fontWeight: 700,
+          fontFamily: 'system-ui, -apple-system, sans-serif',
+          textAlign: 'center',
+          maxWidth: '85%',
+          border: '2px solid #FFA657',
+          boxShadow: '0 8px 32px rgba(0, 0, 0, 0.5)',
+        }}
+      >
+        {meta.title}
+      </div>
+    </div>
+  );
+};
+
+type Word = { word: string; start: number; end: number };
+
+const Captions: React.FC<{ currentSec: number }> = ({ currentSec }) => {
+  if (!isShort) return null;
+  const words = captions as Word[];
+  if (words.length === 0) return null;
+
+  const currentIdx = words.findIndex((w) => currentSec >= w.start && currentSec < w.end);
+  const idx =
+    currentIdx >= 0 ? currentIdx : words.findIndex((w) => w.start > currentSec) - 1;
+  if (idx < 0) return null;
+
+  const start = Math.max(0, idx - 2);
+  const end = Math.min(words.length, start + 5);
+  const visible = words.slice(start, end);
+
+  return (
+    <div
+      style={{
+        position: 'absolute',
+        bottom: 0,
+        left: 0,
+        right: 0,
+        height: CAPTION_BAND_HEIGHT,
+        background:
+          'linear-gradient(to bottom, rgba(0,0,0,0) 0%, rgba(0,0,0,0.85) 40%, rgba(0,0,0,0.95) 100%)',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        pointerEvents: 'none',
+        zIndex: 5,
+      }}
+    >
+      <div
+        style={{
+          maxWidth: '90%',
+          textAlign: 'center',
+          fontFamily: 'system-ui, -apple-system, sans-serif',
+          fontSize: CAPTION_FONT_SIZE,
+          fontWeight: 700,
+          lineHeight: 1.2,
+          textShadow: '0 2px 8px rgba(0, 0, 0, 0.8)',
+        }}
+      >
+        {visible.map((w, i) => {
+          const wordIdx = start + i;
+          const isCurrent = wordIdx === idx;
+          return (
+            <span
+              key={wordIdx}
+              style={{
+                color: isCurrent ? '#FFD700' : '#FFFFFF',
+                marginRight: 12,
+                transition: 'color 0.1s ease',
+              }}
+            >
+              {w.word.trim()}
+            </span>
+          );
+        })}
+      </div>
+    </div>
+  );
+};
+
+export const GoWalkthrough: React.FC = () => {
+  const frame = useCurrentFrame();
+  const { fps } = useVideoConfig();
+  const currentSec = frame / fps;
+
+  const currentEntry = [...schedule].reverse().find((s) => currentSec >= s.startSec);
+  const activeFile = currentEntry?.file ?? fileNames[0];
+
+  const scrollByFile: Record<string, number> = {};
+  const activeLineByFile: Record<string, number | null> = {};
+
+  for (const name of fileNames) {
+    const kf = buildScrollTimeline(name, fps);
+    if (kf.length >= 2) {
+      scrollByFile[name] = interpolate(
+        frame,
+        kf.map((k) => k.frame),
+        kf.map((k) => k.scroll),
+        {
+          extrapolateLeft: 'clamp',
+          extrapolateRight: 'clamp',
+          easing: (t) =>
+            t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2,
+        }
+      );
+    } else if (kf.length === 1) {
+      scrollByFile[name] = kf[0].scroll;
+    } else {
+      scrollByFile[name] = 0;
+    }
+
+    const fileEntries = schedule.filter((s) => s.file === name);
+    const lastForFile = [...fileEntries].reverse().find((s) => currentSec >= s.startSec);
+    activeLineByFile[name] = lastForFile?.line ?? null;
+  }
+
+  return (
+    <AbsoluteFill style={{ backgroundColor: '#0D1117', fontFamily: FONT_STACK, color: '#C9D1D9' }}>
+      <div
+        style={{
+          height: HEADER_HEIGHT,
+          background: '#161B22',
+          color: '#BBBBBB',
+          display: 'flex',
+          alignItems: 'center',
+          padding: '0 16px',
+          fontSize: 13,
+          borderBottom: '1px solid #1E1E1E',
+          flexShrink: 0,
+        }}
+      >
+        {fileNames.length > 1 && !isShort ? 'Walkthrough' : activeFile}
+      </div>
+
+      <TabBar activeFile={activeFile} />
+
+      <div style={{ flex: 1, position: 'relative' }}>
+        {fileNames.map((name) => (
+          <CodePanel
+            key={name}
+            filename={name}
+            code={filesMap[name]}
+            scrollY={scrollByFile[name] ?? 0}
+            activeLine={name === activeFile ? activeLineByFile[name] : null}
+            opacity={name === activeFile ? 1 : 0}
+          />
+        ))}
+      </div>
+
+      <Captions currentSec={currentSec} />
+      <TitleOverlay frame={frame} />
 
       <Audio src={staticFile('narration.mp3')} />
     </AbsoluteFill>
