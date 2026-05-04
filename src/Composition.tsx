@@ -1,4 +1,4 @@
-import { AbsoluteFill, useCurrentFrame, useVideoConfig, Audio, staticFile } from 'remotion';
+import { AbsoluteFill, useCurrentFrame, useVideoConfig, Audio, staticFile, interpolate } from 'remotion';
 import { Highlight } from 'prism-react-renderer';
 import schedule from './schedule.json';
 
@@ -48,8 +48,42 @@ export const GoWalkthrough: React.FC = () => {
     [...schedule].reverse().find((s) => currentSec >= s.startSec)?.line ?? 1;
 
   const lineHeight = 36;
-  const targetScroll = Math.max(0, (activeLine - 8) * lineHeight);
   const fontStack = 'Monaco, Menlo, "Courier New", monospace';
+
+  // Build keyframes from schedule: at each scheduled second, where should the scroll be?
+  // First keyframe is forced to frame 0 so scroll starts settled (not animating in from below).
+  const rawKeyframes = schedule.map((s) => ({
+    frame: Math.round(s.startSec * fps),
+    scroll: Math.max(0, (s.line - 8) * lineHeight),
+  }));
+
+  // Ensure first keyframe is at frame 0 (interpolate clamps before first input)
+  const keyframes =
+    rawKeyframes.length > 0 && rawKeyframes[0].frame > 0
+      ? [{ frame: 0, scroll: rawKeyframes[0].scroll }, ...rawKeyframes]
+      : rawKeyframes;
+
+  // Dedupe consecutive frames with the same value (interpolate requires strictly increasing)
+  const dedupedFrames: number[] = [];
+  const dedupedScrolls: number[] = [];
+  for (const k of keyframes) {
+    if (dedupedFrames.length === 0 || k.frame > dedupedFrames[dedupedFrames.length - 1]) {
+      dedupedFrames.push(k.frame);
+      dedupedScrolls.push(k.scroll);
+    }
+  }
+
+  // Need at least 2 points for interpolate; if only one, pin scroll there
+  const scrollY =
+    dedupedFrames.length >= 2
+      ? interpolate(frame, dedupedFrames, dedupedScrolls, {
+          extrapolateLeft: 'clamp',
+          extrapolateRight: 'clamp',
+          easing: (t) =>
+            // ease-in-out cubic
+            t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2,
+        })
+      : (dedupedScrolls[0] ?? 0);
 
   return (
     <AbsoluteFill style={{ backgroundColor: '#0D1117', fontFamily: fontStack, color: '#C9D1D9' }}>
@@ -71,8 +105,7 @@ export const GoWalkthrough: React.FC = () => {
       <div style={{ flex: 1, padding: '24px 0', overflow: 'hidden' }}>
         <div
           style={{
-            transform: `translateY(-${targetScroll}px)`,
-            transition: 'transform 0.6s cubic-bezier(0.4, 0, 0.2, 1)',
+            transform: `translateY(-${scrollY}px)`,
           }}
         >
           <Highlight theme={githubDarkTheme} code={goCode} language="go">
