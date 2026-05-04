@@ -1,7 +1,17 @@
-Here is a simple Go program that demonstrates a functor.
-[[file:functor.go line:6]] We define a generic Map function that takes a slice of A and a function from A to B.
-[[line:7]] Inside, we create an output slice of the right size.
-[[line:9]] Then we apply the function to each element and return.
-[[line:14]] In main, we create a slice of integers.
-[[line:15]] We map over it, squaring each number.
-[[line:19]] And we print the result.
+[[title:Functor-based LLM Agents in Go]]
+[[file:agent.go line:20]] We start with the core type. Agent of A is a struct holding a function from context to A or error. The whole library is built on this single shape.
+[[line:30]] Pure lifts a plain value into an Agent that simply returns it. This is the unit of the monad.
+[[line:55]] Map applies a function to the result. This is the functor. It's a free function, not a method, because Go can't express same-type-different-parameter through methods.
+[[line:76]] FlatMap chains a function that itself returns an Agent. This is the monad bind. Use it when the next step depends on the result of the previous step.
+[[line:111]] Map two combines two independent agents with a binary function. They run sequentially.
+[[line:132]] Parallel two runs them concurrently, with automatic cancellation if either fails.
+[[line:181]] WithRetry wraps any agent so it retries with exponential backoff. It's a function from Agent to Agent, so it composes naturally.
+[[line:213]] WithTimeout bounds an agent's execution time. Same shape, same composition story.
+[[file:kleisli.go line:23]] Kleisli arrows are functions from A to Agent of B. They're the right abstraction for chained agent calls.
+[[line:37]] Compose is the heart of the design. Two arrows become one. Chaining LLM calls becomes function composition, not callback nesting.
+[[file:main.go line:29]] Now the example. We define domain types: Question, SearchQueries, Findings, Summary. Each step transforms one to the next.
+[[line:78]] Step one: generate search queries from a question. It's a Kleisli arrow, Question to Agent of SearchQueries.
+[[line:116]] Step two: gather findings. We run two searches in parallel using Parallel2, then map the result into a Findings struct.
+[[line:143]] Step three: synthesize a summary from findings.
+[[line:173]] And here's the payoff. The entire pipeline is one expression, three Compose calls. No callback hell, no plumbing, no glue code.
+[[line:187]] In main, we add cross-cutting concerns by wrapping. Retry, timeout, and tracing each take an agent and return a decorated agent. They stack however we want, without touching the pipeline logic.
