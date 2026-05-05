@@ -27,3 +27,6 @@ src/meta.json
 src/codeFiles.json
 src/captions.json
 .env.local
+
+# Active walkthrough scratch — load from walkthrough-pureast/ via Makefile
+walkthrough/

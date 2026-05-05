@@ -1,6 +1,0 @@
-[[title:Generic Map in Go]]
-[[file:functor.go line:6]] In Go, you can write a generic Map function that lifts any function from A to B into a function over slices.
-[[line:7]] Make a slice of B with the right size,
-[[line:9]] apply f to each element,
-[[line:14]] then in main, square some numbers
-[[line:19]] and print them. That's a functor.
