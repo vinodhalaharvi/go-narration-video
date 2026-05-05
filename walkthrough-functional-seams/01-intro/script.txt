@@ -1,0 +1,8 @@
+[[intro icon:💡 text:A Better Way Than Interfaces?]]
+[[title:Functional Seams in Go]]
+[[file:seams.go line:14]] Here is a function that decides if a subscription expired. The problem? It calls time.Now directly. The caller cannot control time. Cannot test edge cases. Cannot simulate the past.
+[[line:26]] Now watch what changes. Same function. Same logic. But what time is it, is now a parameter. A function returning a time. This parameter is the seam. The callsite becomes the policy.
+[[line:32]] Inside the function, we just call now. No global. No clock object. The dependency is explicit and lives at the boundary.
+[[line:40]] In production, we pass time.Now. The seam disappears at compile time. Zero overhead.
+[[line:46]] In a test, we pass any function returning any time we want. No mock framework. No setup. The test reads like a fact.
+[[line:59]] The interface version would force you into a Clock type, a real implementation, a mock implementation, and test plumbing. Three files for one method. The functional seam is one parameter. You haven't introduced an abstraction. You made an existing one explicit. That is the technique.

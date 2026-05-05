@@ -64,6 +64,10 @@ const TITLE_FADE_IN_FRAMES = 6;
 const TITLE_HOLD_FRAMES = 60;
 const TITLE_FADE_OUT_FRAMES = 12;
 
+const INTRO_HOLD_FRAMES = 45;
+const INTRO_FADE_OUT_FRAMES = 8;
+const INTRO_TOTAL_FRAMES = INTRO_HOLD_FRAMES + INTRO_FADE_OUT_FRAMES;
+
 const CAPTION_BAND_HEIGHT = 200;
 const CAPTION_FONT_SIZE = 52;
 
@@ -205,13 +209,19 @@ const TabBar: React.FC<{ activeFile: string }> = ({ activeFile }) => {
 
 const TitleOverlay: React.FC<{ frame: number }> = ({ frame }) => {
   if (!isShort || !meta.title) return null;
+
+  const hasIntro = (meta as any).introIcon || (meta as any).introText;
+  if (frame < INTRO_TOTAL_FRAMES && hasIntro) return null;
+
+  const introOffset = hasIntro ? INTRO_TOTAL_FRAMES : 0;
+  const localFrame = frame - introOffset;
   const fadeInEnd = TITLE_FADE_IN_FRAMES;
   const fadeOutStart = fadeInEnd + TITLE_HOLD_FRAMES;
   const fadeOutEnd = fadeOutStart + TITLE_FADE_OUT_FRAMES;
-  if (frame > fadeOutEnd) return null;
+  if (localFrame > fadeOutEnd) return null;
 
   const opacity = interpolate(
-    frame,
+    localFrame,
     [0, fadeInEnd, fadeOutStart, fadeOutEnd],
     [0, 1, 1, 0],
     { extrapolateLeft: 'clamp', extrapolateRight: 'clamp' }
@@ -248,6 +258,74 @@ const TitleOverlay: React.FC<{ frame: number }> = ({ frame }) => {
       >
         {meta.title}
       </div>
+    </div>
+  );
+};
+
+const IntroCard: React.FC<{ frame: number }> = ({ frame }) => {
+  if (!isShort) return null;
+  const icon = (meta as any).introIcon as string | undefined;
+  const text = (meta as any).introText as string | undefined;
+  if (!icon && !text) return null;
+  if (frame > INTRO_TOTAL_FRAMES) return null;
+
+  const opacity = interpolate(
+    frame,
+    [0, 4, INTRO_HOLD_FRAMES, INTRO_TOTAL_FRAMES],
+    [0, 1, 1, 0],
+    { extrapolateLeft: 'clamp', extrapolateRight: 'clamp' }
+  );
+
+  const scale = interpolate(frame, [0, INTRO_HOLD_FRAMES], [0.95, 1.02], {
+    extrapolateLeft: 'clamp',
+    extrapolateRight: 'clamp',
+  });
+
+  return (
+    <div
+      style={{
+        position: 'absolute',
+        inset: 0,
+        background: 'linear-gradient(135deg, #0D1117 0%, #1C2128 50%, #0D1117 100%)',
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        justifyContent: 'center',
+        opacity,
+        zIndex: 100,
+        pointerEvents: 'none',
+        transform: `scale(${scale})`,
+      }}
+    >
+      {icon && (
+        <div
+          style={{
+            fontSize: 320,
+            lineHeight: 1,
+            marginBottom: 40,
+            filter: 'drop-shadow(0 12px 24px rgba(255, 166, 87, 0.4))',
+          }}
+        >
+          {icon}
+        </div>
+      )}
+      {text && (
+        <div
+          style={{
+            color: '#FFA657',
+            fontSize: 96,
+            fontWeight: 900,
+            fontFamily: 'system-ui, -apple-system, sans-serif',
+            textAlign: 'center',
+            lineHeight: 1.1,
+            padding: '0 60px',
+            letterSpacing: -1,
+            textShadow: '0 4px 24px rgba(255, 166, 87, 0.5), 0 2px 8px rgba(0, 0, 0, 0.8)',
+          }}
+        >
+          {text}
+        </div>
+      )}
     </div>
   );
 };
@@ -388,6 +466,7 @@ export const GoWalkthrough: React.FC = () => {
 
       <Captions currentSec={currentSec} />
       <TitleOverlay frame={frame} />
+      <IntroCard frame={frame} />
 
       <Audio src={staticFile('narration.mp3')} />
     </AbsoluteFill>

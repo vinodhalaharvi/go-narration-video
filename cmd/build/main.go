@@ -36,6 +36,8 @@ type Meta struct {
 	DurationSec float64 `json:"durationSec"`
 	Format      string  `json:"format"` // "long" or "short"
 	Title       string  `json:"title"`
+	IntroIcon   string  `json:"introIcon"`
+	IntroText   string  `json:"introText"`
 }
 
 type CaptionWord struct {
@@ -142,6 +144,29 @@ func extractTitle(script string) (title, cleaned string) {
 	return title, cleaned
 }
 
+// extractIntro pulls an [[intro icon:X text:Y]] directive (shorts only).
+func extractIntro(script string) (icon, text, cleaned string) {
+	introRe := regexp.MustCompile(`\[\[intro\s+([^\]]+)\]\]\s*\n?`)
+	m := introRe.FindStringSubmatch(script)
+	if m == nil {
+		return "", "", script
+	}
+	body := m[1]
+
+	iconRe := regexp.MustCompile(`icon:(\S+)`)
+	if im := iconRe.FindStringSubmatch(body); im != nil {
+		icon = strings.TrimSpace(im[1])
+	}
+
+	textRe := regexp.MustCompile(`text:(.+?)(?:\s+icon:|$)`)
+	if tm := textRe.FindStringSubmatch(body); tm != nil {
+		text = strings.TrimSpace(tm[1])
+	}
+
+	cleaned = introRe.ReplaceAllString(script, "")
+	return icon, text, cleaned
+}
+
 // parseMarkers extracts segments. Supports:
 //   [[file:foo.go line:6]] — explicit
 //   [[line:14]]            — inherits last file
@@ -206,6 +231,7 @@ func main() {
 	}
 
 	title, rawScript := extractTitle(rawScript)
+	introIcon, introText, rawScript := extractIntro(rawScript)
 	segments, cleanText := parseMarkers(rawScript, defaultFile)
 	if len(segments) == 0 {
 		log.Fatal("no narration segments found in script.txt")
@@ -215,6 +241,15 @@ func main() {
 	if os.Getenv("SHORT") == "1" {
 		format = "short"
 		fmt.Println("ℹ shorts mode: 9:16 vertical with baked captions")
+
+		if introText == "" && title != "" {
+			introText = title
+			fmt.Printf("ℹ auto-generated intro from title: %q\n", introText)
+		}
+		if introText != "" && introIcon == "" {
+			introIcon = "💡"
+			fmt.Printf("ℹ default intro icon: %s\n", introIcon)
+		}
 	}
 
 	// --- Generate audio ---
@@ -300,6 +335,8 @@ func main() {
 		DurationSec: transcriptResp.Duration + 0.5,
 		Format:      format,
 		Title:       title,
+		IntroIcon:   introIcon,
+		IntroText:   introText,
 	}
 	metaBytes, _ := json.MarshalIndent(meta, "", "  ")
 	os.WriteFile("src/meta.json", metaBytes, 0644)
@@ -314,5 +351,12 @@ func main() {
 	if meta.Title != "" {
 		fmt.Printf(" (title: %q)", meta.Title)
 	}
+	if meta.IntroText != "" {
+		fmt.Printf(" (intro: %s %q)", meta.IntroIcon, meta.IntroText)
+	}
 	fmt.Println()
+
+	if format == "short" && meta.DurationSec > 60 {
+		fmt.Printf("⚠ WARNING: %.1fs exceeds YouTube Shorts 60s limit. YouTube will treat as regular video.\n", meta.DurationSec)
+	}
 }

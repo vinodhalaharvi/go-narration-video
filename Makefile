@@ -1,5 +1,5 @@
 .DEFAULT_GOAL := help
-.PHONY: help install init audio render build short voices rebuild-audio use-pureast-long use-pureast-short list-pureast-shorts watch studio clean reset preview new add clear-walkthrough check open archive distclean
+.PHONY: help install init audio render build short voices rebuild-audio use-pureast-long use-pureast-short list-pureast-shorts use-fseam list-fseams youtube-meta publish watch studio clean reset preview new add clear-walkthrough check open archive distclean
 
 # ========================================
 # Configuration
@@ -64,7 +64,7 @@ install: init  ## Install all dependencies (npm + go modules)
 init:  ## Create placeholder generated files so the project compiles before first build
 	@mkdir -p walkthrough src public
 	@test -f $(SCHEDULE) || echo '[{"file":"main.go","line":1,"startSec":0}]' > $(SCHEDULE)
-	@test -f $(META) || echo '{"durationSec":5,"format":"long","title":""}' > $(META)
+	@test -f $(META) || echo '{"durationSec":5,"format":"long","title":"","introIcon":"","introText":""}' > $(META)
 	@test -f $(CODEFILES) || echo '{}' > $(CODEFILES)
 	@test -f $(CAPTIONS) || echo '[]' > $(CAPTIONS)
 
@@ -197,9 +197,87 @@ list-pureast-shorts:  ## List all available PureAST shorts with their titles
 	@echo "$(CYAN)Available PureAST shorts:$(RESET)"
 	@for d in walkthrough-pureast/shorts/*/; do \
 		n=$$(basename $$d); \
-		title=$$(grep -m1 -oP '(?<=\[\[title:)[^\]]+' $$d/script.txt 2>/dev/null || echo "(no title)"); \
+		title=$$(sed -n 's/.*\[\[title:\([^]]*\)\]\].*/\1/p' $$d/script.txt | head -1); \
+		[ -z "$$title" ] && title="(no title)"; \
 		printf "  $(GREEN)%s$(RESET)  %s\n" "$$n" "$$title"; \
 	done
+
+# ========================================
+# Functional seam shorts
+# ========================================
+use-fseam:  ## Load a functional-seam short: make use-fseam N=01-intro
+	@test -n "$(N)" || { echo "$(RED)Usage: make use-fseam N=01-intro|02-no-mocks$(RESET)"; exit 1; }
+	@test -d walkthrough-functional-seams/$(N) || { echo "$(RED)✗ walkthrough-functional-seams/$(N) not found$(RESET)"; exit 1; }
+	@echo "$(CYAN)→ Loading functional-seam short: $(N)...$(RESET)"
+	@go run ./cmd/embed --clear
+	@cp walkthrough-functional-seams/$(N)/*.go walkthrough/
+	@cp walkthrough-functional-seams/$(N)/script.txt walkthrough/script.txt
+	@if [ -f walkthrough-functional-seams/$(N)/youtube.md ]; then \
+		cp walkthrough-functional-seams/$(N)/youtube.md walkthrough/youtube.md; \
+	fi
+	@echo "$(GREEN)✓ Loaded $(N).$(RESET)"
+
+list-fseams:  ## List functional-seam shorts with their titles
+	@echo "$(CYAN)Available functional-seam shorts:$(RESET)"
+	@for d in walkthrough-functional-seams/*/; do \
+		n=$$(basename $$d); \
+		title=$$(sed -n 's/.*\[\[title:\([^]]*\)\]\].*/\1/p' $$d/script.txt | head -1); \
+		[ -z "$$title" ] && title="(no title)"; \
+		printf "  $(GREEN)%-15s$(RESET)  %s\n" "$$n" "$$title"; \
+	done
+
+# ========================================
+# YouTube upload (uses ~/.config/go-narration-video/credentials.json)
+# ========================================
+youtube-meta:  ## Print upload metadata for the current walkthrough
+	@if [ ! -f walkthrough/youtube.md ]; then \
+		echo "$(RED)✗ walkthrough/youtube.md not found$(RESET)"; \
+		exit 1; \
+	fi
+	@echo ""
+	@echo "$(CYAN)═══ YOUTUBE UPLOAD METADATA ═══$(RESET)"
+	@echo ""
+	@echo "$(YELLOW)──── TITLE ────$(RESET)"
+	@sed -n 's/^title: *//p' walkthrough/youtube.md | head -1
+	@echo ""
+	@echo "$(YELLOW)──── DESCRIPTION ────$(RESET)"
+	@awk '/^---$$/{f++; next} f==2' walkthrough/youtube.md
+	@echo ""
+	@echo "$(YELLOW)──── TAGS ────$(RESET)"
+	@sed -n '/^tags:/,/^[a-z]/p' walkthrough/youtube.md | grep '^  - ' | sed 's/^  - //' | tr '\n' ',' | sed 's/,$$//' | sed 's/,/, /g'
+	@echo ""
+
+publish: youtube-meta  ## Upload current short to YouTube (asks for confirmation)
+	@if [ ! -f out.mp4 ]; then \
+		echo "$(RED)✗ out.mp4 not found — run 'make short' or 'make render' first$(RESET)"; \
+		exit 1; \
+	fi
+	@if [ ! -f $$HOME/.config/go-narration-video/credentials.json ]; then \
+		echo "$(RED)✗ credentials.json not found at ~/.config/go-narration-video/credentials.json$(RESET)"; \
+		echo "$(YELLOW)  See docs/youtube-setup.md to set up.$(RESET)"; \
+		exit 1; \
+	fi
+	@if command -v ffprobe >/dev/null 2>&1; then \
+		duration=$$(ffprobe -v error -show_entries format=duration -of csv=p=0 out.mp4 2>/dev/null | cut -d. -f1); \
+		size=$$(ls -lh out.mp4 | awk '{print $$5}'); \
+		echo "$(YELLOW)──── FILE INFO ────$(RESET)"; \
+		echo "  out.mp4  $$size  $${duration}s"; \
+		if [ -n "$$duration" ] && [ $$duration -gt 60 ]; then \
+			echo "  $(RED)⚠ Over 60s — YouTube will treat as regular video, not a Short$(RESET)"; \
+		fi; \
+		echo ""; \
+	fi
+	@printf "$(CYAN)Upload this video to YouTube? [N/y] $(RESET)"
+	@read confirm; \
+	case "$$confirm" in \
+		y|Y|yes|YES) \
+			echo "$(CYAN)→ Uploading...$(RESET)"; \
+			go run ./cmd/youtube out.mp4 \
+			;; \
+		*) \
+			echo "$(YELLOW)Aborted.$(RESET)" \
+			;; \
+	esac
 
 # ========================================
 # Iteration helpers

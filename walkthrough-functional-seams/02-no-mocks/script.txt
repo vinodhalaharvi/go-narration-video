@@ -1,0 +1,12 @@
+[[intro icon:🧪 text:Tests Without Mocks?]]
+[[title:Functional Seams Eliminate Mocks]]
+[[file:payments.go line:13]] Here is the standard Go way. A PaymentService interface with Charge and Refund methods. Looks innocent.
+[[line:20]] But to test code that uses this interface, you need a mock implementation. A struct that satisfies the interface, with fake methods, with call counters. Thirty lines of plumbing per service.
+[[line:40]] Now watch the functional version. ProcessOrder takes the seams it actually uses. Not a PaymentService. Just a way to charge, and a way to notify. Two function parameters.
+[[line:46]] Inside, we just call them. No interface dispatch. No mock object. The function does its job.
+[[line:56]] Now the key idea. We define each behavior as a named function value. Charge OK. Charge Declined. Notify OK. Notify Fails. These are not mocks. They are reusable building blocks.
+[[line:76]] First test. The happy path. Compose Charge OK with Notify OK. One line.
+[[line:81]] Second test. Charge declined. Same Notify OK from before, just swap in Charge Declined.
+[[line:86]] Third test. Notify is down. Reuse Charge OK. Swap Notify. Each test picks two behaviors from the vocabulary, like ordering from a menu.
+[[line:95]] When you need to capture arguments, build a closure inline. The slice records every charge attempt. Closures over local state replace every "expect this call with these args" matcher you have ever written.
+[[line:110]] Four tests. Three reused behaviors. One inline closure. Zero mock framework. The stubs are values you compose. The test is a sentence. You have not replaced your mocking library. You have made it unnecessary.
