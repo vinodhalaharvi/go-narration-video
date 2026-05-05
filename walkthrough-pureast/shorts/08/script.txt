@@ -1,0 +1,4 @@
+[[title:PR context for an LLM, without the bloat]]
+[[file:diff.go line:40]] Asking an LLM to review a PR? Don't paste the whole repo.
+[[line:50]] PureAST's diff command extracts only the symbols whose lines actually changed since a git ref.
+[[file:diff_hunks.go line:43]] It walks the git hunks, intersects them with symbol line ranges, and pulls just those declarations. Tight context, sharper review.

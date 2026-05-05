@@ -1,0 +1,4 @@
+[[title:Visitor pattern, but better]]
+[[file:visitor.go line:9]] The classic visitor pattern is interfaces and dispatch. PureAST does it as a pure function — Dependencies to Dependencies.
+[[line:12]] Identity: do nothing.
+[[line:19]] Compose: run them in sequence. That's it. The whole AST traversal is built from these.

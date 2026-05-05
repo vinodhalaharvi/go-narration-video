@@ -1,0 +1,4 @@
+[[title:Monoids in 60 seconds]]
+[[file:node.go line:35]] A monoid is two things — an empty value, and a way to combine two values associatively.
+[[line:42]] Empty: the identity. Combining anything with empty gives you back the original.
+[[line:47]] Combine: associative. The order you group operations doesn't matter. Sets, strings, lists, dependencies — they're all monoids. Once you see the pattern, you see it everywhere.

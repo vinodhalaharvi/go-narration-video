@@ -1,5 +1,5 @@
 .DEFAULT_GOAL := help
-.PHONY: help install init audio render build short voices rebuild-audio watch studio clean reset preview new add clear-walkthrough check open archive distclean
+.PHONY: help install init audio render build short voices rebuild-audio use-pureast-long use-pureast-short list-pureast-shorts watch studio clean reset preview new add clear-walkthrough check open archive distclean
 
 # ========================================
 # Configuration
@@ -145,6 +145,34 @@ rebuild-audio: check  ## Regenerate audio with a different voice (keeps existing
 	@echo "$(CYAN)→ Regenerating audio (VOICE=$$VOICE PROVIDER=$$PROVIDER)...$(RESET)"
 	@go run ./cmd/build
 	@echo "$(GREEN)✓ Audio regenerated. Run 'make render' to update video.$(RESET)"
+
+# ========================================
+# PureAST walkthroughs (swap into walkthrough/)
+# ========================================
+use-pureast-long:  ## Load the long-form PureAST walkthrough into walkthrough/
+	@test -d walkthrough-pureast/long || { echo "$(RED)✗ walkthrough-pureast/long not found$(RESET)"; exit 1; }
+	@echo "$(CYAN)→ Loading PureAST long-form walkthrough...$(RESET)"
+	@go run ./cmd/embed --clear
+	@cp walkthrough-pureast/long/*.go walkthrough/
+	@cp walkthrough-pureast/long/script.txt walkthrough/script.txt
+	@echo "$(GREEN)✓ Loaded. Run 'make build' to render.$(RESET)"
+
+use-pureast-short:  ## Load a PureAST short: make use-pureast-short N=01
+	@test -n "$(N)" || { echo "$(RED)Usage: make use-pureast-short N=01$(RESET)"; exit 1; }
+	@test -d walkthrough-pureast/shorts/$(N) || { echo "$(RED)✗ walkthrough-pureast/shorts/$(N) not found$(RESET)"; exit 1; }
+	@echo "$(CYAN)→ Loading PureAST short #$(N)...$(RESET)"
+	@go run ./cmd/embed --clear
+	@cp walkthrough-pureast/shorts/$(N)/*.go walkthrough/
+	@cp walkthrough-pureast/shorts/$(N)/script.txt walkthrough/script.txt
+	@echo "$(GREEN)✓ Loaded short #$(N). Run 'make short' to render vertical.$(RESET)"
+
+list-pureast-shorts:  ## List all available PureAST shorts with their titles
+	@echo "$(CYAN)Available PureAST shorts:$(RESET)"
+	@for d in walkthrough-pureast/shorts/*/; do \
+		n=$$(basename $$d); \
+		title=$$(grep -m1 -oP '(?<=\[\[title:)[^\]]+' $$d/script.txt 2>/dev/null || echo "(no title)"); \
+		printf "  $(GREEN)%s$(RESET)  %s\n" "$$n" "$$title"; \
+	done
 
 # ========================================
 # Iteration helpers

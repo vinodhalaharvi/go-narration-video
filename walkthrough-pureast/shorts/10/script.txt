@@ -1,0 +1,4 @@
+[[title:Why functorial design scales]]
+[[file:extract.go line:14]] Every operation in PureAST is a pure function — Dependencies in, Dependencies out.
+[[line:25]] Combining them is just function composition.
+[[line:67]] Parsing a file, extracting a type, walking a directory — all the same shape. Once the algebra is right, adding features is mechanical. That's what category theory buys you in a real codebase.

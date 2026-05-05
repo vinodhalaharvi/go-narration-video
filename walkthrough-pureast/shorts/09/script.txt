@@ -1,0 +1,4 @@
+[[title:Give Claude direct access to your codebase]]
+[[file:mcp_main.go line:14]] PureAST ships with an MCP server, so Claude can call it directly during a chat.
+[[line:22]] Add it to your Claude config and the LLM gets eight tools — dump, extract, deps, diff, search.
+[[file:tools.go line:20]] On-demand context, only when needed. The model decides what to ask for. You stop pasting code into chat.

@@ -1,0 +1,4 @@
+[[title:Token budgets that don't break syntax]]
+[[file:dump.go line:31]] Most "truncate to N tokens" tools cut mid-line and produce garbage that won't parse.
+[[line:53]] PureAST's max-tokens is symbol-aware. It drops whole declarations.
+[[line:300]] What comes out is always syntactically complete Go. The LLM can re-parse it. No surprises.

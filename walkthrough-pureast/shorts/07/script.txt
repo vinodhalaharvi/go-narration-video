@@ -1,0 +1,4 @@
+[[title:One symbol, with everything it needs]]
+[[file:extract.go line:18]] Sometimes you just need one type explained. Not the whole package.
+[[line:28]] Extract grabs a single symbol — and pulls in every transitive dependency it needs to compile.
+[[file:deps.go line:23]] The dependency resolver is a graph traversal that follows references through the package, returning a minimal compilable subgraph. Perfect for asking an LLM about one piece without the noise.

@@ -1,0 +1,4 @@
+[[title:Pure functions = free parallelism]]
+[[file:directory.go line:147]] When your extraction logic is pure, parallelism is free.
+[[line:85]] The monoid lets you combine results in any order.
+[[line:101]] Each file gets parsed concurrently, results merge with Combine. No locks. No coordination. The math handles it.

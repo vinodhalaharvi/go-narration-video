@@ -1,0 +1,4 @@
+[[title:Stop sending whole files to your LLM]]
+[[file:dump.go line:1]] Most LLM context is wasted on noise — function bodies, helper code, things you don't need.
+[[line:53]] PureAST's dump command extracts only signatures.
+[[line:300]] You get the shape of the package — types, functions, returns — in a fraction of the tokens. Same understanding, way less context.

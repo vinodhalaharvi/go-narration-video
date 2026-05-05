@@ -1,0 +1,4 @@
+[[title:An AST in 30 seconds]]
+[[file:node.go line:11]] An abstract syntax tree is just a typed representation of your code.
+[[line:22]] Each node is a struct, each child is a field.
+[[line:47]] You can walk it, transform it, compose it. The Go standard library gives you the parser. Tools like PureAST give you the abstractions to do something useful with it.
