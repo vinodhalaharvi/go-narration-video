@@ -21,7 +21,7 @@ When you need to capture call arguments, a closure over a local slice does the j
 
 I haven't written a mock in two years. This is why.
 
-→ Part 1 (intro to functional seams): [add link]
+→ Part 1 (intro to functional seams): https://www.youtube.com/watch?v=wYQlhtJEcUI
 → More Go content on this channel
 
 What's your favorite testing pattern in Go? Drop a comment.
