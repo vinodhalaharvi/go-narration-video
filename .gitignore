@@ -26,3 +26,4 @@ src/schedule.json
 src/meta.json
 src/codeFiles.json
 src/captions.json
+.env.local
