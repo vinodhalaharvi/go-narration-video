@@ -149,12 +149,39 @@ rebuild-audio: check  ## Regenerate audio with a different voice (keeps existing
 # ========================================
 # PureAST walkthroughs (swap into walkthrough/)
 # ========================================
-use-pureast-long:  ## Load the long-form PureAST walkthrough into walkthrough/
+PUREAST_DUMPS ?= $(HOME)/pureast-stdlib-dumps
+
+use-pureast-long:  ## Load the long-form PureAST walkthrough (needs stdlib dumps)
 	@test -d walkthrough-pureast/long || { echo "$(RED)✗ walkthrough-pureast/long not found$(RESET)"; exit 1; }
 	@echo "$(CYAN)→ Loading PureAST long-form walkthrough...$(RESET)"
 	@go run ./cmd/embed --clear
 	@cp walkthrough-pureast/long/*.go walkthrough/
 	@cp walkthrough-pureast/long/script.txt walkthrough/script.txt
+	@echo "$(CYAN)→ Looking for stdlib dumps in $(PUREAST_DUMPS)...$(RESET)"
+	@if [ -d "$(PUREAST_DUMPS)" ]; then \
+		missing=0; \
+		for f in nethttp.go context.go io.go sync.go; do \
+			if [ -f "$(PUREAST_DUMPS)/$$f" ]; then \
+				cp "$(PUREAST_DUMPS)/$$f" walkthrough/; \
+				echo "  $(GREEN)✓$(RESET) $$f"; \
+			else \
+				echo "  $(YELLOW)⚠$(RESET) $$f missing in $(PUREAST_DUMPS)"; \
+				missing=$$((missing+1)); \
+			fi; \
+		done; \
+		if [ $$missing -gt 0 ]; then \
+			echo "$(YELLOW)⚠ $$missing stdlib dump(s) missing — those sections will not render$(RESET)"; \
+		fi; \
+	else \
+		echo "$(RED)✗ $(PUREAST_DUMPS) does not exist.$(RESET)"; \
+		echo "$(YELLOW)Generate stdlib dumps first:$(RESET)"; \
+		echo "  mkdir -p $(PUREAST_DUMPS) && cd $(PUREAST_DUMPS)"; \
+		echo "  pureast dump \$$(go env GOROOT)/src/net/http > nethttp.go"; \
+		echo "  pureast dump \$$(go env GOROOT)/src/context > context.go"; \
+		echo "  pureast dump \$$(go env GOROOT)/src/io > io.go"; \
+		echo "  pureast dump \$$(go env GOROOT)/src/sync > sync.go"; \
+		exit 1; \
+	fi
 	@echo "$(GREEN)✓ Loaded. Run 'make build' to render.$(RESET)"
 
 use-pureast-short:  ## Load a PureAST short: make use-pureast-short N=01
