@@ -3,6 +3,8 @@
 [[speed:0.9]]
 [[mode:typewriter granularity:line]]
 [[viz:tree start-line:69]]
+In this short, we will build a generic Fold function that walks any tree. Then we will define predicates as plain functions, compose them with And, Or, and Not, and watch our queries read like English.
+[[pause:0.6]]
 [[file:fold.go reveal lines:1-10]] We start with the data. A node has a name, a number, and any children that are themselves nodes. Recursive type, three fields.
 [[pause:0.5]]
 [[reveal lines:12-21]] Now the most important function in this video. Fold takes a tree, an initial value, and a folding function. It applies the function to the current node, then recurses into every child, threading the accumulator through. The accumulator carries state across the whole tree. The folding function decides how to update that state at each node. This single shape replaces every recursive walk you ever wrote. Counting nodes? Fold. Summing values? Fold. Collecting names? Fold. Building any data structure from a tree? Fold.
@@ -11,18 +13,18 @@
 [[pause:0.4]]
 [[reveal lines:29-37]] Primitives. Match by name. Match by a minimum number. Check if a node is a leaf. One line each.
 [[pause:0.5]]
-[[reveal lines:43-45]] Combinators. And. Or. Not. Three lines, every Boolean query.
+[[reveal lines:43-45]] Combinators. Build And, Or, and Not. Three lines, every Boolean query.
 [[pause:0.4]]
-[[reveal lines:48-56]] Find ties it together. Fold the tree, append every match. Notice — Find is just Fold plus a predicate.
+[[reveal lines:48-56]] Find ties it together. Fold the tree, append every match. Notice that Find is just Fold plus a predicate.
 [[pause:0.7]]
 [[reveal lines:69-79]] Now let us see it work. Here is a sample tree. Three branches. Some leaves. A mix of names and numbers.
 [[pause:0.5]]
-[[reveal lines:83-87]] Query one. Find by name. Two alpha nodes anywhere in the tree. Returns two.
+[[reveal lines:83-87]] First query. Find by name returns the alpha branch and its leaf. Two matches.
 [[pause:0.4]]
-[[reveal lines:89-92]] Query two. Compose with And. Big leaves only. Returns two.
+[[reveal lines:89-92]] Second query. Use And to keep big leaves only. Two matches again.
 [[pause:0.4]]
-[[reveal lines:94-97]] Query three. Compose with Or. Alpha or beta. Returns four.
+[[reveal lines:94-97]] Third query. Use Or to match alpha or beta. Four results.
 [[pause:0.4]]
-[[reveal lines:99-102]] Query four. Compose with Not. Branches only. Returns three.
+[[reveal lines:99-102]] Fourth query. Negate the leaf check to get every branch. Three matches.
 [[pause:0.6]]
-[[reveal lines:104-108]] Last one. Drop Find entirely. Use Fold directly. Sum all the numbers. Returns five hundred and ten. The same Fold powers every single query above.
+[[reveal lines:104-108]] Last one. Drop Find entirely and use Fold directly. Sum all numbers. Five hundred and ten. The same Fold powers every query above.

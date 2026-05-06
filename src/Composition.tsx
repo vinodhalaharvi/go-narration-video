@@ -625,9 +625,17 @@ const TitleOverlay: React.FC<{ frame: number }> = ({ frame }) => {
   if (!isShort || !meta.title) return null;
 
   const hasIntro = (meta as any).introIcon || (meta as any).introText;
-  if (frame < INTRO_TOTAL_FRAMES && hasIntro) return null;
 
-  const introOffset = hasIntro ? INTRO_TOTAL_FRAMES : 0;
+  // Match the dynamic intro duration computed in IntroCard.
+  const introUntilSec = ((meta as any).introUntilSec as number) || 0;
+  const fps = 30;
+  const dynamicIntroFrames = introUntilSec > 0.5
+    ? Math.round(introUntilSec * fps)
+    : INTRO_TOTAL_FRAMES;
+
+  if (frame < dynamicIntroFrames && hasIntro) return null;
+
+  const introOffset = hasIntro ? dynamicIntroFrames : 0;
   const localFrame = frame - introOffset;
   const fadeInEnd = TITLE_FADE_IN_FRAMES;
   const fadeOutStart = fadeInEnd + TITLE_HOLD_FRAMES;
@@ -676,21 +684,40 @@ const TitleOverlay: React.FC<{ frame: number }> = ({ frame }) => {
   );
 };
 
+// IntroCard renders a fullscreen intro at the very start.
+// Duration: meta.introUntilSec (set by build pipeline to first reveal's start
+// time in typewriter mode, so any introductory narration plays over it).
+// Falls back to ~1.5s if meta.introUntilSec is unset.
 const IntroCard: React.FC<{ frame: number }> = ({ frame }) => {
   if (!isShort) return null;
   const icon = (meta as any).introIcon as string | undefined;
   const text = (meta as any).introText as string | undefined;
   if (!icon && !text) return null;
-  if (frame > INTRO_TOTAL_FRAMES) return null;
+
+  // Dynamic intro duration: hold for (introUntilSec - 0.3s fade) seconds,
+  // then fade out over 0.3s. Fall back to fixed frame counts if no introUntilSec.
+  const introUntilSec = ((meta as any).introUntilSec as number) || 0;
+  const fps = 30;
+  let holdFrames: number;
+  let fadeOutFrames: number;
+  if (introUntilSec > 0.5) {
+    fadeOutFrames = 9; // 0.3s
+    holdFrames = Math.max(0, Math.round(introUntilSec * fps) - fadeOutFrames);
+  } else {
+    holdFrames = INTRO_HOLD_FRAMES;
+    fadeOutFrames = INTRO_FADE_OUT_FRAMES;
+  }
+  const totalFrames = holdFrames + fadeOutFrames;
+  if (frame > totalFrames) return null;
 
   const opacity = interpolate(
     frame,
-    [0, 4, INTRO_HOLD_FRAMES, INTRO_TOTAL_FRAMES],
+    [0, 4, holdFrames, totalFrames],
     [0, 1, 1, 0],
     { extrapolateLeft: 'clamp', extrapolateRight: 'clamp' }
   );
 
-  const scale = interpolate(frame, [0, INTRO_HOLD_FRAMES], [0.95, 1.02], {
+  const scale = interpolate(frame, [0, holdFrames], [0.95, 1.02], {
     extrapolateLeft: 'clamp',
     extrapolateRight: 'clamp',
   });

@@ -48,6 +48,11 @@ type Meta struct {
 	// the SampleTree definition is revealed).
 	Viz         string  `json:"viz"`
 	VizStartSec float64 `json:"vizStartSec"`
+
+	// IntroUntilSec is when the intro card finishes (and code typing begins).
+	// In typewriter mode, this is the start time of the first reveal — any
+	// narration before that plays over the intro card.
+	IntroUntilSec float64 `json:"introUntilSec"`
 }
 
 // RevealEntry describes a typewriter reveal beat.
@@ -79,11 +84,32 @@ type segment struct {
 	anchor string
 }
 
+// numberWordEquiv maps spelled-out numbers to digits and vice versa.
+// Whisper sometimes transcribes "two" as "2" or vice versa, which breaks
+// strict anchor matching. We normalize to digits for matching purposes.
+// Includes both cardinals (one→1) and ordinals (first→1st→1).
+var numberWordEquiv = map[string]string{
+	"zero": "0", "one": "1", "two": "2", "three": "3", "four": "4",
+	"five": "5", "six": "6", "seven": "7", "eight": "8", "nine": "9",
+	"ten": "10", "eleven": "11", "twelve": "12",
+	"first": "1st", "second": "2nd", "third": "3rd", "fourth": "4th",
+	"fifth": "5th", "sixth": "6th", "seventh": "7th", "eighth": "8th",
+	"ninth": "9th", "tenth": "10th",
+}
+
 func normalize(s string) string {
 	s = strings.ToLower(s)
 	s = regexp.MustCompile(`[^a-z0-9 ]`).ReplaceAllString(s, "")
 	s = regexp.MustCompile(`\s+`).ReplaceAllString(s, " ")
-	return strings.TrimSpace(s)
+	s = strings.TrimSpace(s)
+	// Map number words to digits so "two" and "2" are equivalent
+	fields := strings.Fields(s)
+	for i, w := range fields {
+		if d, ok := numberWordEquiv[w]; ok {
+			fields[i] = d
+		}
+	}
+	return strings.Join(fields, " ")
 }
 
 func findPhraseStart(words []Word, phrase string, fromIdx int) (float64, int) {
@@ -297,10 +323,12 @@ func extractPauses(script string) (cleaned string, durations []float64) {
 
 // reveal is a parsed [[reveal lines:N-M]] directive in typewriter mode.
 type reveal struct {
-	file     string
-	lineFrom int
-	lineTo   int
-	anchor   string // first 4 words after the directive (for time matching)
+	file       string
+	lineFrom   int
+	lineTo     int
+	anchor     string // first 4 words after the directive (for time matching)
+	narration  string // full narration text for this beat (used to estimate
+	// how long typing should run, so it finishes when narration ends)
 }
 
 // parseTypewriterReveals extracts [[file:X.go reveal lines:N-M]] or
@@ -344,12 +372,17 @@ func parseTypewriterReveals(rawScript, defaultFile string) ([]reveal, []segment,
 			to = from
 		}
 		text := strings.TrimSpace(parts[i+1])
+		// Strip pause sentinels from narration before storing — they don't
+		// add real spoken time, so they shouldn't affect duration estimates.
+		narration := regexp.MustCompile(`‖PAUSE\d+‖`).ReplaceAllString(text, "")
+		narration = strings.TrimSpace(narration)
 		anchor := firstNWords(text, 4)
 		reveals = append(reveals, reveal{
-			file:     currentFile,
-			lineFrom: from,
-			lineTo:   to,
-			anchor:   anchor,
+			file:      currentFile,
+			lineFrom:  from,
+			lineTo:    to,
+			anchor:    anchor,
+			narration: narration,
 		})
 		segments = append(segments, segment{
 			file:   currentFile,
@@ -623,13 +656,11 @@ func main() {
 
 	// Build typewriter reveal timeline.
 	// Each reveal's StartSec = anchor time of that beat in the schedule.
-	// EndSec = StartSec of next beat (or total duration if last).
+	// EndSec = StartSec + estimated narration duration of that beat (so typing
+	// finishes when narration finishes, leaving idle cursor time during pauses
+	// or while the next beat's narration starts up).
 	var typewriterReveals []RevealEntry
 	if mode == "typewriter" && len(reveals) > 0 {
-		// Walk schedule entries that correspond to reveal segments.
-		// We rely on the reveal/segment 1:1 ordering: reveals[i] is at the same
-		// place in segments as schedule[j] where j tracks matched anchors.
-		// Find timing for each reveal by re-matching its anchor.
 		searchFrom := 0
 		revealStarts := make([]float64, len(reveals))
 		for i, r := range reveals {
@@ -643,13 +674,109 @@ func main() {
 			searchFrom = nextIdx
 		}
 		totalDur := transcriptResp.Duration + 0.5
+		// Estimate per-reveal narration duration from its character count vs.
+		// total narrated characters. We subtract intro narration time and
+		// pause time from the audio budget so they aren't counted as reveal
+		// narration.
+		totalChars := 0
+		for _, r := range reveals {
+			totalChars += len(r.narration)
+		}
+		var totalPauseSec float64
+		for _, d := range pauseDurations {
+			totalPauseSec += d
+		}
+		// Time spent before the first reveal (intro narration + initial silence)
+		var introTime float64
+		if len(revealStarts) > 0 && revealStarts[0] > 0 {
+			introTime = revealStarts[0]
+		}
+		audioBudget := totalDur - totalPauseSec - introTime
+		if audioBudget < 1 {
+			audioBudget = 1
+		}
+
+		// FALLBACK: any reveal whose anchor failed to match gets a synthesized
+		// start time interpolated between its nearest matched neighbors.
+		// This way no reveal is silently dropped — at worst, timing is approximate.
+		failedCount := 0
+		for i, s := range revealStarts {
+			if s >= 0 {
+				continue
+			}
+			failedCount++
+			// Find the nearest matched neighbors before and after
+			prevStart := -1.0
+			prevIdx := -1
+			for j := i - 1; j >= 0; j-- {
+				if revealStarts[j] >= 0 {
+					prevStart = revealStarts[j]
+					prevIdx = j
+					break
+				}
+			}
+			nextStart := -1.0
+			nextIdx := -1
+			for j := i + 1; j < len(revealStarts); j++ {
+				if revealStarts[j] >= 0 {
+					nextStart = revealStarts[j]
+					nextIdx = j
+					break
+				}
+			}
+			if prevStart >= 0 && nextStart >= 0 {
+				// Interpolate by char count between prev and next
+				var charsBetween int
+				for k := prevIdx + 1; k <= i; k++ {
+					charsBetween += len(reveals[k].narration)
+				}
+				var totalCharsBetween int
+				for k := prevIdx + 1; k <= nextIdx; k++ {
+					totalCharsBetween += len(reveals[k].narration)
+				}
+				gap := nextStart - prevStart
+				if totalCharsBetween > 0 {
+					revealStarts[i] = prevStart + gap*float64(charsBetween)/float64(totalCharsBetween)
+				} else {
+					revealStarts[i] = (prevStart + nextStart) / 2
+				}
+			} else if prevStart >= 0 {
+				// No next match — assume this beat starts right after prev
+				revealStarts[i] = prevStart + 1.0
+			} else if nextStart >= 0 {
+				// No prev match — assume this beat starts a moment before next
+				revealStarts[i] = nextStart - 1.0
+			} else {
+				// No matches anywhere — distribute evenly
+				revealStarts[i] = float64(i) * (totalDur / float64(len(reveals)))
+			}
+		}
+		if failedCount > 0 {
+			fmt.Printf("ℹ %d reveal anchor(s) failed to match — synthesized timing from neighbors\n", failedCount)
+		}
+
 		for i, r := range reveals {
 			if revealStarts[i] < 0 {
 				continue
 			}
-			end := totalDur
-			if i+1 < len(reveals) && revealStarts[i+1] >= 0 {
+			// Estimated narration duration for this beat
+			var beatDur float64
+			if totalChars > 0 {
+				beatDur = float64(len(r.narration)) / float64(totalChars) * audioBudget
+			} else {
+				beatDur = 1.0
+			}
+			// Don't overrun next reveal's start
+			end := revealStarts[i] + beatDur
+			if i+1 < len(reveals) && revealStarts[i+1] >= 0 && end > revealStarts[i+1] {
 				end = revealStarts[i+1]
+			}
+			if end > totalDur {
+				end = totalDur
+			}
+			// Sanity floor — at least 0.4s of typing time
+			if end < revealStarts[i]+0.4 {
+				end = revealStarts[i] + 0.4
 			}
 			typewriterReveals = append(typewriterReveals, RevealEntry{
 				File:     r.file,
@@ -676,6 +803,17 @@ func main() {
 		}
 	}
 
+	// Intro card duration: if there's intro narration before the first reveal
+	// (in typewriter mode), extend the intro card to cover that narration.
+	// Otherwise use a fixed 1.5s intro.
+	introUntilSec := 1.8 // default: ~1.5s hold + fade
+	if mode == "typewriter" && len(typewriterReveals) > 0 {
+		firstReveal := typewriterReveals[0].StartSec
+		if firstReveal > introUntilSec {
+			introUntilSec = firstReveal
+		}
+	}
+
 	meta := Meta{
 		DurationSec:       transcriptResp.Duration + 0.5,
 		Format:            format,
@@ -686,6 +824,7 @@ func main() {
 		TypewriterReveals: typewriterReveals,
 		Viz:               vizKind,
 		VizStartSec:       vizStartSec,
+		IntroUntilSec:     introUntilSec,
 	}
 	if mode != "typewriter" {
 		meta.Typewriter = ""

@@ -64,7 +64,7 @@ install: init  ## Install all dependencies (npm + go modules)
 init:  ## Create placeholder generated files so the project compiles before first build
 	@mkdir -p walkthrough src public
 	@test -f $(SCHEDULE) || echo '[{"file":"main.go","line":1,"startSec":0}]' > $(SCHEDULE)
-	@test -f $(META) || echo '{"durationSec":5,"format":"long","title":"","introIcon":"","introText":"","typewriter":"","typewriterReveals":[],"viz":"","vizStartSec":0}' > $(META)
+	@test -f $(META) || echo '{"durationSec":5,"format":"long","title":"","introIcon":"","introText":"","typewriter":"","typewriterReveals":[],"viz":"","vizStartSec":0,"introUntilSec":0}' > $(META)
 	@test -f $(CODEFILES) || echo '{}' > $(CODEFILES)
 	@test -f $(CAPTIONS) || echo '[]' > $(CAPTIONS)
 
