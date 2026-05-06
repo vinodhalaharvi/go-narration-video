@@ -1,5 +1,5 @@
 .DEFAULT_GOAL := help
-.PHONY: help install init audio render build short voices rebuild-audio use-pureast-long use-pureast-short list-pureast-shorts use-fseam list-fseams use-typewriter list-typewriter youtube-meta publish watch studio clean reset preview new add clear-walkthrough check open archive distclean
+.PHONY: help install init audio render build short voices rebuild-audio use-pureast-long use-pureast-short list-pureast-shorts use-fseam list-fseams use-typewriter list-typewriter script script-file youtube-meta publish watch studio clean reset preview new add clear-walkthrough check open archive distclean
 
 # ========================================
 # Configuration
@@ -81,9 +81,9 @@ check:  ## Verify environment is set up correctly
 # ========================================
 # Pipeline
 # ========================================
-audio: check  ## Generate narration MP3 + schedule + codeFiles from script. Optional: MODE=typewriter|off GRANULARITY=line|word SPEED=0.85
+audio: check  ## Generate narration MP3 + schedule + codeFiles from script. Optional: MODE=typewriter|off GRANULARITY=line|word SPEED=0.85 NARRATION_FILE=path/to/recording.m4a
 	@echo "$(CYAN)→ Running Go pipeline (TTS + Whisper + schedule)...$(RESET)"
-	@MODE="$(MODE)" GRANULARITY="$(GRANULARITY)" SPEED="$(SPEED)" go run ./cmd/build
+	@MODE="$(MODE)" GRANULARITY="$(GRANULARITY)" SPEED="$(SPEED)" NARRATION_FILE="$(NARRATION_FILE)" go run ./cmd/build
 
 render: init  ## Render MP4 (auto-generates audio if missing)
 	@if [ ! -f $(AUDIO) ]; then \
@@ -97,9 +97,9 @@ render: init  ## Render MP4 (auto-generates audio if missing)
 
 build: audio render  ## Full pipeline: audio + schedule + render (long-form 1920x1080)
 
-short:  ## Build a vertical short (1080x1920 with baked captions). Optional: MODE=typewriter|off GRANULARITY=line|word SPEED=0.85
+short:  ## Build a vertical short (1080x1920 with baked captions). Optional: MODE=typewriter|off GRANULARITY=line|word SPEED=0.85 NARRATION_FILE=path/to/recording.m4a
 	@echo "$(CYAN)→ Generating shorts-mode audio + schedule...$(RESET)"
-	@SHORT=1 MODE="$(MODE)" GRANULARITY="$(GRANULARITY)" SPEED="$(SPEED)" $(MAKE) audio
+	@SHORT=1 MODE="$(MODE)" GRANULARITY="$(GRANULARITY)" SPEED="$(SPEED)" NARRATION_FILE="$(NARRATION_FILE)" $(MAKE) audio
 	@echo "$(CYAN)→ Rendering shorts-mode video...$(RESET)"
 	@rm -rf node_modules/.cache $(OUTPUT)
 	@npx remotion render $(COMPOSITION) $(OUTPUT)
@@ -249,6 +249,26 @@ list-typewriter:  ## List typewriter walkthroughs
 		[ -z "$$title" ] && title="(no title)"; \
 		printf "  $(GREEN)%-15s$(RESET)  %s\n" "$$n" "$$title"; \
 	done
+
+# ========================================
+# Reading script (for recording your own narration)
+# ========================================
+script:  ## Print clean reading copy of current walkthrough's script (narration only, no directives)
+	@if [ ! -f walkthrough/script.txt ]; then \
+		echo "$(RED)✗ walkthrough/script.txt not found$(RESET)"; \
+		echo "$(YELLOW)  Run 'make use-typewriter N=...' or similar first.$(RESET)"; \
+		exit 1; \
+	fi
+	@go run ./cmd/script
+
+script-file:  ## Save reading copy to ./reading-script.txt (for AirDrop / phone notes)
+	@if [ ! -f walkthrough/script.txt ]; then \
+		echo "$(RED)✗ walkthrough/script.txt not found$(RESET)"; \
+		exit 1; \
+	fi
+	@go run ./cmd/script -o reading-script.txt
+	@echo "$(GREEN)→ AirDrop or copy reading-script.txt to your phone, record into Voice Memos.$(RESET)"
+	@echo "$(GREEN)→ Then: NARRATION_FILE=~/your-recording.m4a make short$(RESET)"
 
 # ========================================
 # YouTube upload (uses ~/.config/go-narration-video/credentials.json)

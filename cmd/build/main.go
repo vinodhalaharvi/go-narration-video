@@ -18,6 +18,7 @@ import (
 	"io"
 	"log"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -677,32 +678,60 @@ func main() {
 	}
 
 	// --- Generate audio ---
-	tts, err := NewTTS()
-	if err != nil {
-		log.Fatalf("TTS setup failed: %v", err)
-	}
-	fmt.Printf("✓ using TTS: %s\n", tts.Name())
-
 	os.MkdirAll("public", 0755)
 
-	// If pauses are present, split cleanText on the sentinels, synthesize each
-	// chunk, and stitch with silence in between.
-	if len(pauseDurations) > 0 {
-		if err := synthesizeWithPauses(tts, cleanText, pauseDurations, speed, "public/narration.mp3"); err != nil {
-			log.Fatalf("TTS with pauses failed: %v", err)
+	// NARRATION_FILE: if set, skip TTS entirely and use the user's recording.
+	// Whisper still runs on it for word timestamps. Pauses/speed are TTS-only
+	// — they have no effect when using a recording (your natural pacing wins).
+	if narrFile := strings.TrimSpace(os.Getenv("NARRATION_FILE")); narrFile != "" {
+		expanded := narrFile
+		if strings.HasPrefix(expanded, "~/") {
+			home, _ := os.UserHomeDir()
+			expanded = filepath.Join(home, expanded[2:])
+		}
+		if _, err := os.Stat(expanded); err != nil {
+			log.Fatalf("NARRATION_FILE not found: %s", expanded)
+		}
+		fmt.Printf("✓ using narration file: %s\n", expanded)
+		// Convert/normalize to MP3 at 24kHz mono so Whisper handles it cleanly.
+		// Works for .m4a, .wav, .mp3, .flac, .ogg, etc.
+		cmd := exec.Command("ffmpeg", "-y", "-i", expanded,
+			"-ar", "24000", "-ac", "1",
+			"-c:a", "libmp3lame", "-q:a", "4",
+			"-loglevel", "error",
+			"public/narration.mp3")
+		if out, err := cmd.CombinedOutput(); err != nil {
+			log.Fatalf("ffmpeg conversion failed: %v\n%s", err, string(out))
+		}
+		if len(pauseDurations) > 0 || speed != 1.0 {
+			fmt.Println("ℹ note: [[pause]] and [[speed]] directives are TTS-only and have no effect on recorded narration")
 		}
 	} else {
-		audioStream, err := tts.Synthesize(context.Background(), cleanText, speed)
+		tts, err := NewTTS()
 		if err != nil {
-			log.Fatalf("TTS request failed: %v", err)
+			log.Fatalf("TTS setup failed: %v", err)
 		}
-		defer audioStream.Close()
-		out, err := os.Create("public/narration.mp3")
-		if err != nil {
-			log.Fatal(err)
+		fmt.Printf("✓ using TTS: %s\n", tts.Name())
+
+		// If pauses are present, split cleanText on the sentinels, synthesize each
+		// chunk, and stitch with silence in between.
+		if len(pauseDurations) > 0 {
+			if err := synthesizeWithPauses(tts, cleanText, pauseDurations, speed, "public/narration.mp3"); err != nil {
+				log.Fatalf("TTS with pauses failed: %v", err)
+			}
+		} else {
+			audioStream, err := tts.Synthesize(context.Background(), cleanText, speed)
+			if err != nil {
+				log.Fatalf("TTS request failed: %v", err)
+			}
+			defer audioStream.Close()
+			out, err := os.Create("public/narration.mp3")
+			if err != nil {
+				log.Fatal(err)
+			}
+			io.Copy(out, audioStream)
+			out.Close()
 		}
-		io.Copy(out, audioStream)
-		out.Close()
 	}
 	fmt.Println("✓ audio generated")
 

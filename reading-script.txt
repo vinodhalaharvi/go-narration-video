@@ -1,0 +1,55 @@
+═══════════════════════════════════════════════════════════════
+  READING SCRIPT — Web Framework in 50 Lines
+═══════════════════════════════════════════════════════════════
+
+Tips: read at a natural pace, pause briefly between beats,
+don't worry about exact wording — Whisper transcribes whatever
+you actually say. The first 4 words of each beat should match
+the script (those are the sync anchors).
+
+[INTRO]
+We are about to build a complete web framework using only stdlib http. Functions as handlers, functions as middleware, composed with one combinator. Forty-five lines, no dependencies.
+
+[Pause briefly]
+
+[BEAT 1]
+First, the lead from the standard library. The Handler interface has one method. HandlerFunc is a function type. It satisfies the interface by calling itself. A closure that implements an interface. This pattern is the entire trick. We will follow it.
+
+[Pause briefly]
+
+[BEAT 2]
+Our Handler is just an alias for the stdlib type. Drops the noise.
+
+[Pause briefly]
+
+[BEAT 3]
+Two example handlers. Hello says hello. Plain function value.
+
+[Pause briefly]
+
+[BEAT 4]
+Another handler. It reads a user from the request context and writes it back. The context key is unexported, classic Go.
+
+[Pause briefly]
+
+[BEAT 5]
+Now the composition. Middleware is a function from Handler to Handler. That is the entire abstraction.
+
+[Pause briefly]
+
+[BEAT 6]
+Here is one middleware. Read the token. If wrong, return four hundred one. Otherwise put the user on context and call next. No struct. No interface beyond the alias. Just a closure wrapping a closure.
+
+[Pause briefly]
+
+[BEAT 7]
+Chain composes middleware right to left. Apply each one to wrap the handler. Now you can stack as many as you like.
+
+[Pause briefly]
+
+[BEAT 8]
+Wire it up. Mount Hello as public. Wrap WhoAmI through Chain of RequireAuth. Run the server. That is everything. Quick demo. Without a token, get rejected. With the right header, see the user. And every line above can be tested without a single mock. Just call the handler with httptest. That is the next video.
+
+═══════════════════════════════════════════════════════════════
+  Total: 239 words, ~96s at natural pace
+═══════════════════════════════════════════════════════════════
