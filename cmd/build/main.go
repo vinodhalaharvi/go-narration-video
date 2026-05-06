@@ -38,6 +38,21 @@ type Meta struct {
 	Title       string  `json:"title"`
 	IntroIcon   string  `json:"introIcon"`
 	IntroText   string  `json:"introText"`
+	// Typewriter mode reveals code progressively instead of highlighting
+	// pre-existing code. Empty = off (default highlight mode).
+	Typewriter            string         `json:"typewriter"`            // "" | "line" | "word"
+	TypewriterReveals     []RevealEntry  `json:"typewriterReveals"`     // ordered timeline
+}
+
+// RevealEntry describes a typewriter reveal beat.
+// At time StartSec, lines [LineFrom..LineTo] of File begin animating.
+// They finish by EndSec (the start of the next reveal, or end of audio).
+type RevealEntry struct {
+	File      string  `json:"file"`
+	LineFrom  int     `json:"lineFrom"`
+	LineTo    int     `json:"lineTo"`
+	StartSec  float64 `json:"startSec"`
+	EndSec    float64 `json:"endSec"`
 }
 
 type CaptionWord struct {
@@ -167,6 +182,90 @@ func extractIntro(script string) (icon, text, cleaned string) {
 	return icon, text, cleaned
 }
 
+// extractMode pulls a [[mode:typewriter granularity:line|word]] directive.
+// Returns ("line"|"word"|"") for granularity. Default granularity is "line".
+func extractMode(script string) (mode, granularity, cleaned string) {
+	modeRe := regexp.MustCompile(`\[\[mode:typewriter(?:\s+granularity:(\w+))?\]\]\s*\n?`)
+	m := modeRe.FindStringSubmatch(script)
+	if m == nil {
+		return "", "", script
+	}
+	mode = "typewriter"
+	granularity = m[1]
+	if granularity != "word" {
+		granularity = "line"
+	}
+	cleaned = modeRe.ReplaceAllString(script, "")
+	return mode, granularity, cleaned
+}
+
+// reveal is a parsed [[reveal lines:N-M]] directive in typewriter mode.
+type reveal struct {
+	file     string
+	lineFrom int
+	lineTo   int
+	anchor   string // first 4 words after the directive (for time matching)
+}
+
+// parseTypewriterReveals extracts [[file:X.go reveal lines:N-M]] or
+// [[reveal lines:N-M]] directives. The script is the post-extractMode text.
+//
+// Returns the reveal list, the cleaned script (markers removed), and a flat
+// list of "segments" compatible with parseMarkers' contract so audio sync
+// keeps working: each reveal counts as a narration beat at the line LineFrom.
+func parseTypewriterReveals(rawScript, defaultFile string) ([]reveal, []segment, string) {
+	// Match either [[file:X.go reveal lines:N[-M]]] or [[reveal lines:N[-M]]]
+	revealRe := regexp.MustCompile(`\[\[(?:file:(\S+)\s+)?reveal\s+lines:(\d+)(?:-(\d+))?\]\]`)
+	parts := revealRe.Split(rawScript, -1)
+	matches := revealRe.FindAllStringSubmatch(rawScript, -1)
+
+	var reveals []reveal
+	var segments []segment
+	currentFile := defaultFile
+
+	intro := strings.TrimSpace(parts[0])
+	if intro != "" && len(matches) > 0 {
+		// Intro narration before first reveal — anchor at line 1
+		segments = append(segments, segment{
+			file:   currentFile,
+			line:   1,
+			anchor: firstNWords(intro, 4),
+		})
+	}
+
+	for i, m := range matches {
+		fileGroup := m[1]
+		fromS := m[2]
+		toS := m[3]
+		if fileGroup != "" {
+			currentFile = fileGroup
+		}
+		var from, to int
+		fmt.Sscanf(fromS, "%d", &from)
+		if toS != "" {
+			fmt.Sscanf(toS, "%d", &to)
+		} else {
+			to = from
+		}
+		text := strings.TrimSpace(parts[i+1])
+		anchor := firstNWords(text, 4)
+		reveals = append(reveals, reveal{
+			file:     currentFile,
+			lineFrom: from,
+			lineTo:   to,
+			anchor:   anchor,
+		})
+		segments = append(segments, segment{
+			file:   currentFile,
+			line:   from,
+			anchor: anchor,
+		})
+	}
+
+	cleaned := revealRe.ReplaceAllString(rawScript, "")
+	return reveals, segments, cleaned
+}
+
 // parseMarkers extracts segments. Supports:
 //   [[file:foo.go line:6]] — explicit
 //   [[line:14]]            — inherits last file
@@ -232,7 +331,62 @@ func main() {
 
 	title, rawScript := extractTitle(rawScript)
 	introIcon, introText, rawScript := extractIntro(rawScript)
-	segments, cleanText := parseMarkers(rawScript, defaultFile)
+
+	// Typewriter mode: switches the rendering model entirely.
+	// Reveals replace markers as the source of narration beats.
+	mode, granularity, rawScript := extractMode(rawScript)
+
+	// Env var overrides (set via Makefile variables, e.g. `make short MODE=typewriter`).
+	// MODE=typewriter         — force typewriter on (script must have [[reveal ...]] directives)
+	// MODE=off                — force highlight-and-scroll mode even if script has [[mode:typewriter]]
+	// GRANULARITY=line|word   — override granularity (only meaningful in typewriter mode)
+	if envMode := strings.TrimSpace(os.Getenv("MODE")); envMode != "" {
+		switch envMode {
+		case "typewriter":
+			if mode != "typewriter" {
+				fmt.Println("ℹ MODE=typewriter override: forcing typewriter mode")
+				mode = "typewriter"
+				if granularity == "" {
+					granularity = "line"
+				}
+			}
+		case "off", "highlight":
+			if mode == "typewriter" {
+				fmt.Println("ℹ MODE=off override: forcing highlight mode (ignoring [[mode:typewriter]])")
+				mode = ""
+				granularity = ""
+			}
+		default:
+			log.Fatalf("invalid MODE=%q (use 'typewriter' or 'off')", envMode)
+		}
+	}
+	if envGran := strings.TrimSpace(os.Getenv("GRANULARITY")); envGran != "" && mode == "typewriter" {
+		switch envGran {
+		case "line", "word":
+			if granularity != envGran {
+				fmt.Printf("ℹ GRANULARITY=%s override\n", envGran)
+				granularity = envGran
+			}
+		default:
+			log.Fatalf("invalid GRANULARITY=%q (use 'line' or 'word')", envGran)
+		}
+	}
+
+	var reveals []reveal
+	var segments []segment
+	var cleanText string
+	if mode == "typewriter" {
+		reveals, segments, cleanText = parseTypewriterReveals(rawScript, defaultFile)
+		// Strip whitespace and collapse the cleaned narration text
+		cleanText = regexp.MustCompile(`\s+`).ReplaceAllString(cleanText, " ")
+		cleanText = strings.TrimSpace(cleanText)
+		fmt.Printf("ℹ typewriter mode (granularity: %s) — %d reveal(s)\n", granularity, len(reveals))
+		if len(reveals) == 0 {
+			log.Fatal("typewriter mode is on but no [[reveal lines:N-M]] directives found in script")
+		}
+	} else {
+		segments, cleanText = parseMarkers(rawScript, defaultFile)
+	}
 	if len(segments) == 0 {
 		log.Fatal("no narration segments found in script.txt")
 	}
@@ -331,12 +485,57 @@ func main() {
 	captionsBytes, _ := json.MarshalIndent(captions, "", "  ")
 	os.WriteFile("src/captions.json", captionsBytes, 0644)
 
+	// Build typewriter reveal timeline.
+	// Each reveal's StartSec = anchor time of that beat in the schedule.
+	// EndSec = StartSec of next beat (or total duration if last).
+	var typewriterReveals []RevealEntry
+	if mode == "typewriter" && len(reveals) > 0 {
+		// Walk schedule entries that correspond to reveal segments.
+		// We rely on the reveal/segment 1:1 ordering: reveals[i] is at the same
+		// place in segments as schedule[j] where j tracks matched anchors.
+		// Find timing for each reveal by re-matching its anchor.
+		searchFrom := 0
+		revealStarts := make([]float64, len(reveals))
+		for i, r := range reveals {
+			startSec, nextIdx := findPhraseStart(words, r.anchor, searchFrom)
+			if startSec < 0 {
+				fmt.Printf("⚠ couldn't locate reveal anchor %q for %s:%d-%d\n", r.anchor, r.file, r.lineFrom, r.lineTo)
+				revealStarts[i] = -1
+				continue
+			}
+			revealStarts[i] = startSec
+			searchFrom = nextIdx
+		}
+		totalDur := transcriptResp.Duration + 0.5
+		for i, r := range reveals {
+			if revealStarts[i] < 0 {
+				continue
+			}
+			end := totalDur
+			if i+1 < len(reveals) && revealStarts[i+1] >= 0 {
+				end = revealStarts[i+1]
+			}
+			typewriterReveals = append(typewriterReveals, RevealEntry{
+				File:     r.file,
+				LineFrom: r.lineFrom,
+				LineTo:   r.lineTo,
+				StartSec: revealStarts[i],
+				EndSec:   end,
+			})
+		}
+	}
+
 	meta := Meta{
-		DurationSec: transcriptResp.Duration + 0.5,
-		Format:      format,
-		Title:       title,
-		IntroIcon:   introIcon,
-		IntroText:   introText,
+		DurationSec:       transcriptResp.Duration + 0.5,
+		Format:            format,
+		Title:             title,
+		IntroIcon:         introIcon,
+		IntroText:         introText,
+		Typewriter:        granularity, // "" if not typewriter mode
+		TypewriterReveals: typewriterReveals,
+	}
+	if mode != "typewriter" {
+		meta.Typewriter = ""
 	}
 	metaBytes, _ := json.MarshalIndent(meta, "", "  ")
 	os.WriteFile("src/meta.json", metaBytes, 0644)
@@ -346,6 +545,12 @@ func main() {
 	for _, s := range schedule {
 		fmt.Printf("   %s:%d at %.2fs\n", s.File, s.Line, s.StartSec)
 	}
+	if len(typewriterReveals) > 0 {
+		fmt.Printf("✓ typewriter reveals:\n")
+		for _, r := range typewriterReveals {
+			fmt.Printf("   %s:%d-%d at %.2f-%.2fs\n", r.File, r.LineFrom, r.LineTo, r.StartSec, r.EndSec)
+		}
+	}
 	fmt.Printf("✓ duration: %.2fs (video will end here)\n", meta.DurationSec)
 	fmt.Printf("✓ format: %s", meta.Format)
 	if meta.Title != "" {
@@ -354,9 +559,18 @@ func main() {
 	if meta.IntroText != "" {
 		fmt.Printf(" (intro: %s %q)", meta.IntroIcon, meta.IntroText)
 	}
+	if meta.Typewriter != "" {
+		fmt.Printf(" (typewriter: %s)", meta.Typewriter)
+	}
 	fmt.Println()
 
-	if format == "short" && meta.DurationSec > 60 {
-		fmt.Printf("⚠ WARNING: %.1fs exceeds YouTube Shorts 60s limit. YouTube will treat as regular video.\n", meta.DurationSec)
+	// YouTube Shorts limit was bumped to 3 minutes (180s) on Oct 15, 2024.
+	if format == "short" {
+		switch {
+		case meta.DurationSec > 180:
+			fmt.Printf("⚠ WARNING: %.1fs exceeds YouTube Shorts 180s (3 min) limit. YouTube will treat as regular video.\n", meta.DurationSec)
+		case meta.DurationSec > 60:
+			fmt.Printf("ℹ %.1fs is over 60s — still a Short (max is 180s), but retention drops sharply past 60s. Sweet spot is 20-45s.\n", meta.DurationSec)
+		}
 	}
 }

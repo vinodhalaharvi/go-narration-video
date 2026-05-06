@@ -51,6 +51,8 @@ const filesMap: Record<string, string> =
 const fileNames = Object.keys(filesMap).sort();
 
 const isShort = meta.format === 'short';
+const isTypewriter = (meta as any).typewriter === 'line' || (meta as any).typewriter === 'word';
+const typewriterGranularity = (meta as any).typewriter as 'line' | 'word' | undefined;
 
 const LINE_HEIGHT = isShort ? 44 : 36;
 const CODE_FONT_SIZE = isShort ? 28 : 22;
@@ -70,6 +72,16 @@ const INTRO_TOTAL_FRAMES = INTRO_HOLD_FRAMES + INTRO_FADE_OUT_FRAMES;
 
 const CAPTION_BAND_HEIGHT = 200;
 const CAPTION_FONT_SIZE = 52;
+
+// Typewriter reveal data from cmd/build
+type RevealEntry = {
+  file: string;
+  lineFrom: number;
+  lineTo: number;
+  startSec: number;
+  endSec: number;
+};
+const typewriterReveals: RevealEntry[] = ((meta as any).typewriterReveals as RevealEntry[]) || [];
 
 type Keyframe = { frame: number; scroll: number };
 
@@ -154,6 +166,184 @@ const CodePanel: React.FC<{
                         {line.map((token, key) => (
                           <span key={key} {...getTokenProps({ token })} />
                         ))}
+                      </pre>
+                    </div>
+                  );
+                })}
+              </>
+            )}
+          </Highlight>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// ============================================================
+// TypewriterPanel — for [[mode:typewriter]] walkthroughs.
+// Reveals code progressively (line or word granularity) instead of
+// highlighting pre-existing code.
+// ============================================================
+
+// Compute how much of `text` should be visible at progress 0..1, using a given
+// granularity. Returns the visible substring.
+function revealAtProgress(text: string, progress: number, granularity: 'line' | 'word'): string {
+  if (progress <= 0) return '';
+  if (progress >= 1) return text;
+  if (granularity === 'word') {
+    // Split keeping whitespace so reconstructed string preserves layout
+    const parts = text.split(/(\s+)/);
+    const wordCount = parts.filter((p) => /\S/.test(p)).length;
+    const targetWords = Math.ceil(wordCount * progress);
+    let seenWords = 0;
+    let out = '';
+    for (const p of parts) {
+      out += p;
+      if (/\S/.test(p)) {
+        seenWords++;
+        if (seenWords >= targetWords) break;
+      }
+    }
+    return out;
+  }
+  // line granularity: reveal whole lines proportionally
+  const lines = text.split('\n');
+  const targetLines = Math.ceil(lines.length * progress);
+  return lines.slice(0, targetLines).join('\n');
+}
+
+// Build the visible code state at currentSec, for a given file in typewriter mode.
+// Returns the partial code string to render.
+function typewriterStateForFile(filename: string, fullCode: string, currentSec: number): string {
+  // Find all reveals for this file
+  const fileReveals = typewriterReveals.filter((r) => r.file === filename);
+  if (fileReveals.length === 0) return '';
+
+  const lines = fullCode.split('\n');
+
+  // Determine "fully revealed up to which line" and which (if any) reveal is currently animating
+  let revealedThrough = 0; // line index (1-based, inclusive) fully revealed
+  let activeReveal: RevealEntry | null = null;
+
+  for (const r of fileReveals) {
+    if (currentSec >= r.endSec) {
+      // Fully revealed
+      revealedThrough = Math.max(revealedThrough, r.lineTo);
+    } else if (currentSec >= r.startSec) {
+      // This is the active animating reveal. Earlier lines still fully revealed.
+      revealedThrough = Math.max(revealedThrough, r.lineFrom - 1);
+      activeReveal = r;
+      break;
+    }
+  }
+
+  // Compose: full lines [1..revealedThrough] + animated portion of activeReveal
+  const fullPart = lines.slice(0, revealedThrough).join('\n');
+
+  if (!activeReveal) {
+    return fullPart;
+  }
+
+  // Animate lines [activeReveal.lineFrom .. activeReveal.lineTo]
+  const animatedBlock = lines
+    .slice(activeReveal.lineFrom - 1, activeReveal.lineTo)
+    .join('\n');
+  const span = Math.max(activeReveal.endSec - activeReveal.startSec, 0.01);
+  const progress = Math.max(0, Math.min(1, (currentSec - activeReveal.startSec) / span));
+  const animated = revealAtProgress(
+    animatedBlock,
+    progress,
+    typewriterGranularity || 'line'
+  );
+
+  return fullPart + (fullPart ? '\n' : '') + animated;
+}
+
+// Cursor: blinks at end of partial code.
+const Cursor: React.FC<{ frame: number }> = ({ frame }) => {
+  const blink = Math.floor(frame / 15) % 2 === 0;
+  return (
+    <span
+      style={{
+        display: 'inline-block',
+        width: '0.5em',
+        marginLeft: 1,
+        background: blink ? '#58A6FF' : 'transparent',
+        height: '1em',
+        verticalAlign: 'text-bottom',
+      }}
+    />
+  );
+};
+
+const TypewriterPanel: React.FC<{
+  filename: string;
+  fullCode: string;
+  currentSec: number;
+  frame: number;
+  opacity: number;
+}> = ({ filename, fullCode, currentSec, frame, opacity }) => {
+  const visibleCode = typewriterStateForFile(filename, fullCode, currentSec);
+  const visibleLines = visibleCode.split('\n');
+
+  // Auto-scroll: keep the latest line visible
+  const totalLinesVisible = visibleLines.length;
+  const scrollY = Math.max(0, (totalLinesVisible - VISIBLE_LINE_OFFSET) * LINE_HEIGHT);
+
+  return (
+    <div
+      style={{
+        position: 'absolute',
+        inset: 0,
+        opacity,
+        transition: 'opacity 0.3s ease',
+        pointerEvents: 'none',
+      }}
+    >
+      <div style={{ flex: 1, padding: '24px 0', overflow: 'hidden', height: '100%' }}>
+        <div style={{ transform: `translateY(-${scrollY}px)` }}>
+          <Highlight theme={githubDarkTheme} code={visibleCode} language="go">
+            {({ tokens, getTokenProps }) => (
+              <>
+                {tokens.map((line, i) => {
+                  const lineNum = i + 1;
+                  const isLastLine = i === tokens.length - 1;
+                  return (
+                    <div
+                      key={`${filename}-tw-${i}`}
+                      style={{
+                        display: 'flex',
+                        height: LINE_HEIGHT,
+                        alignItems: 'center',
+                        background: isLastLine ? 'rgba(88, 166, 255, 0.10)' : 'transparent',
+                      }}
+                    >
+                      <span
+                        style={{
+                          color: '#484F58',
+                          width: 60,
+                          textAlign: 'right',
+                          paddingRight: 16,
+                          fontSize: LINE_NUM_FONT_SIZE,
+                          userSelect: 'none',
+                          fontFamily: FONT_STACK,
+                        }}
+                      >
+                        {lineNum}
+                      </span>
+                      <pre
+                        style={{
+                          margin: 0,
+                          fontFamily: FONT_STACK,
+                          fontSize: CODE_FONT_SIZE,
+                          whiteSpace: 'pre',
+                          color: '#C9D1D9',
+                        }}
+                      >
+                        {line.map((token, key) => (
+                          <span key={key} {...getTokenProps({ token })} />
+                        ))}
+                        {isLastLine && <Cursor frame={frame} />}
                       </pre>
                     </div>
                   );
@@ -452,16 +642,27 @@ export const GoWalkthrough: React.FC = () => {
       <TabBar activeFile={activeFile} />
 
       <div style={{ flex: 1, position: 'relative' }}>
-        {fileNames.map((name) => (
-          <CodePanel
-            key={name}
-            filename={name}
-            code={filesMap[name]}
-            scrollY={scrollByFile[name] ?? 0}
-            activeLine={name === activeFile ? activeLineByFile[name] : null}
-            opacity={name === activeFile ? 1 : 0}
-          />
-        ))}
+        {fileNames.map((name) =>
+          isTypewriter ? (
+            <TypewriterPanel
+              key={name}
+              filename={name}
+              fullCode={filesMap[name]}
+              currentSec={currentSec}
+              frame={frame}
+              opacity={name === activeFile ? 1 : 0}
+            />
+          ) : (
+            <CodePanel
+              key={name}
+              filename={name}
+              code={filesMap[name]}
+              scrollY={scrollByFile[name] ?? 0}
+              activeLine={name === activeFile ? activeLineByFile[name] : null}
+              opacity={name === activeFile ? 1 : 0}
+            />
+          )
+        )}
       </div>
 
       <Captions currentSec={currentSec} />

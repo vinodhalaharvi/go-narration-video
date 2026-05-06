@@ -1,5 +1,5 @@
 .DEFAULT_GOAL := help
-.PHONY: help install init audio render build short voices rebuild-audio use-pureast-long use-pureast-short list-pureast-shorts use-fseam list-fseams youtube-meta publish watch studio clean reset preview new add clear-walkthrough check open archive distclean
+.PHONY: help install init audio render build short voices rebuild-audio use-pureast-long use-pureast-short list-pureast-shorts use-fseam list-fseams use-typewriter list-typewriter youtube-meta publish watch studio clean reset preview new add clear-walkthrough check open archive distclean
 
 # ========================================
 # Configuration
@@ -42,7 +42,7 @@ help:  ## Show this help
 	@echo ""
 	@echo "$(YELLOW)YouTube short (vertical 9:16 with captions):$(RESET)"
 	@echo "  edit walkthrough/script.txt — add [[title:Your Hook]] at top"
-	@echo "  keep narration under 60 seconds"
+	@echo "  keep narration under 60s for best engagement (180s is the hard cap)"
 	@echo "  make short && make open"
 	@echo ""
 	@echo "$(YELLOW)Voice selection:$(RESET)"
@@ -64,7 +64,7 @@ install: init  ## Install all dependencies (npm + go modules)
 init:  ## Create placeholder generated files so the project compiles before first build
 	@mkdir -p walkthrough src public
 	@test -f $(SCHEDULE) || echo '[{"file":"main.go","line":1,"startSec":0}]' > $(SCHEDULE)
-	@test -f $(META) || echo '{"durationSec":5,"format":"long","title":"","introIcon":"","introText":""}' > $(META)
+	@test -f $(META) || echo '{"durationSec":5,"format":"long","title":"","introIcon":"","introText":"","typewriter":"","typewriterReveals":[]}' > $(META)
 	@test -f $(CODEFILES) || echo '{}' > $(CODEFILES)
 	@test -f $(CAPTIONS) || echo '[]' > $(CAPTIONS)
 
@@ -81,9 +81,9 @@ check:  ## Verify environment is set up correctly
 # ========================================
 # Pipeline
 # ========================================
-audio: check  ## Generate narration MP3 + schedule + codeFiles from script
+audio: check  ## Generate narration MP3 + schedule + codeFiles from script. Optional: MODE=typewriter|off GRANULARITY=line|word
 	@echo "$(CYAN)→ Running Go pipeline (TTS + Whisper + schedule)...$(RESET)"
-	@go run ./cmd/build
+	@MODE="$(MODE)" GRANULARITY="$(GRANULARITY)" go run ./cmd/build
 
 render: init  ## Render MP4 (auto-generates audio if missing)
 	@if [ ! -f $(AUDIO) ]; then \
@@ -97,9 +97,9 @@ render: init  ## Render MP4 (auto-generates audio if missing)
 
 build: audio render  ## Full pipeline: audio + schedule + render (long-form 1920x1080)
 
-short:  ## Build a vertical short (1080x1920 with baked captions)
+short:  ## Build a vertical short (1080x1920 with baked captions). Optional: MODE=typewriter|off GRANULARITY=line|word
 	@echo "$(CYAN)→ Generating shorts-mode audio + schedule...$(RESET)"
-	@SHORT=1 $(MAKE) audio
+	@SHORT=1 MODE="$(MODE)" GRANULARITY="$(GRANULARITY)" $(MAKE) audio
 	@echo "$(CYAN)→ Rendering shorts-mode video...$(RESET)"
 	@rm -rf node_modules/.cache $(OUTPUT)
 	@npx remotion render $(COMPOSITION) $(OUTPUT)
@@ -227,6 +227,30 @@ list-fseams:  ## List functional-seam shorts with their titles
 	done
 
 # ========================================
+# Typewriter walkthroughs (build code from scratch with reveal animations)
+# ========================================
+use-typewriter:  ## Load a typewriter walkthrough: make use-typewriter N=01-fold
+	@test -n "$(N)" || { echo "$(RED)Usage: make use-typewriter N=01-fold$(RESET)"; exit 1; }
+	@test -d walkthrough-typewriter/$(N) || { echo "$(RED)✗ walkthrough-typewriter/$(N) not found$(RESET)"; exit 1; }
+	@echo "$(CYAN)→ Loading typewriter walkthrough: $(N)...$(RESET)"
+	@go run ./cmd/embed --clear
+	@cp walkthrough-typewriter/$(N)/*.go walkthrough/
+	@cp walkthrough-typewriter/$(N)/script.txt walkthrough/script.txt
+	@if [ -f walkthrough-typewriter/$(N)/youtube.md ]; then \
+		cp walkthrough-typewriter/$(N)/youtube.md walkthrough/youtube.md; \
+	fi
+	@echo "$(GREEN)✓ Loaded $(N).$(RESET)"
+
+list-typewriter:  ## List typewriter walkthroughs
+	@echo "$(CYAN)Available typewriter walkthroughs:$(RESET)"
+	@for d in walkthrough-typewriter/*/; do \
+		n=$$(basename $$d); \
+		title=$$(sed -n 's/.*\[\[title:\([^]]*\)\]\].*/\1/p' $$d/script.txt | head -1); \
+		[ -z "$$title" ] && title="(no title)"; \
+		printf "  $(GREEN)%-15s$(RESET)  %s\n" "$$n" "$$title"; \
+	done
+
+# ========================================
 # YouTube upload (uses ~/.config/go-narration-video/credentials.json)
 # ========================================
 youtube-meta:  ## Print upload metadata for the current walkthrough
@@ -262,8 +286,10 @@ publish: youtube-meta  ## Upload current short to YouTube (asks for confirmation
 		size=$$(ls -lh out.mp4 | awk '{print $$5}'); \
 		echo "$(YELLOW)──── FILE INFO ────$(RESET)"; \
 		echo "  out.mp4  $$size  $${duration}s"; \
-		if [ -n "$$duration" ] && [ $$duration -gt 60 ]; then \
-			echo "  $(RED)⚠ Over 60s — YouTube will treat as regular video, not a Short$(RESET)"; \
+		if [ -n "$$duration" ] && [ $$duration -gt 180 ]; then \
+			echo "  $(RED)⚠ Over 180s — YouTube will treat as regular video, not a Short$(RESET)"; \
+		elif [ -n "$$duration" ] && [ $$duration -gt 60 ]; then \
+			echo "  $(YELLOW)ℹ Over 60s — still a Short (max 180s), but engagement sweet spot is 20-45s$(RESET)"; \
 		fi; \
 		echo ""; \
 	fi
