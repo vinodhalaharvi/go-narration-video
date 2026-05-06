@@ -40,8 +40,14 @@ type Meta struct {
 	IntroText   string  `json:"introText"`
 	// Typewriter mode reveals code progressively instead of highlighting
 	// pre-existing code. Empty = off (default highlight mode).
-	Typewriter            string         `json:"typewriter"`            // "" | "line" | "word"
-	TypewriterReveals     []RevealEntry  `json:"typewriterReveals"`     // ordered timeline
+	Typewriter        string        `json:"typewriter"`        // "" | "line" | "word"
+	TypewriterReveals []RevealEntry `json:"typewriterReveals"` // ordered timeline
+
+	// Bottom-panel visualization. "" = off, "tree" = SampleTree viz.
+	// VizStartSec is the time at which the viz becomes visible (typically when
+	// the SampleTree definition is revealed).
+	Viz         string  `json:"viz"`
+	VizStartSec float64 `json:"vizStartSec"`
 }
 
 // RevealEntry describes a typewriter reveal beat.
@@ -219,6 +225,26 @@ func extractSpeed(script string) (speed float64, cleaned string) {
 	}
 	cleaned = speedRe.ReplaceAllString(script, "")
 	return speed, cleaned
+}
+
+// extractViz pulls a [[viz:tree start-line:N]] directive.
+// `start-line` tells us which reveal triggers the viz appearing — the viz
+// becomes visible when the typewriter reaches the reveal that includes
+// (or is just past) line N.
+//
+// Returns kind="" if not present.
+func extractViz(script string) (kind string, startLine int, cleaned string) {
+	vizRe := regexp.MustCompile(`\[\[viz:(\w+)(?:\s+start-line:(\d+))?\]\]\s*\n?`)
+	m := vizRe.FindStringSubmatch(script)
+	if m == nil {
+		return "", 0, script
+	}
+	kind = m[1]
+	if m[2] != "" {
+		fmt.Sscanf(m[2], "%d", &startLine)
+	}
+	cleaned = vizRe.ReplaceAllString(script, "")
+	return kind, startLine, cleaned
 }
 
 // pause marks an inserted silence between narration segments.
@@ -431,6 +457,9 @@ func main() {
 		fmt.Printf("ℹ %d pause(s) requested\n", len(pauseDurations))
 	}
 
+	// Optional bottom-panel visualization (e.g. [[viz:tree start-line:69]])
+	vizKind, vizStartLine, rawScript := extractViz(rawScript)
+
 	// Typewriter mode: switches the rendering model entirely.
 	// Reveals replace markers as the source of narration beats.
 	mode, granularity, rawScript := extractMode(rawScript)
@@ -632,6 +661,21 @@ func main() {
 		}
 	}
 
+	// Compute viz start time: find the reveal that contains or starts at vizStartLine.
+	var vizStartSec float64
+	if vizKind != "" && vizStartLine > 0 {
+		for _, r := range typewriterReveals {
+			if r.LineFrom <= vizStartLine && vizStartLine <= r.LineTo {
+				vizStartSec = r.StartSec
+				break
+			}
+			if r.LineFrom >= vizStartLine {
+				vizStartSec = r.StartSec
+				break
+			}
+		}
+	}
+
 	meta := Meta{
 		DurationSec:       transcriptResp.Duration + 0.5,
 		Format:            format,
@@ -640,6 +684,8 @@ func main() {
 		IntroText:         introText,
 		Typewriter:        granularity, // "" if not typewriter mode
 		TypewriterReveals: typewriterReveals,
+		Viz:               vizKind,
+		VizStartSec:       vizStartSec,
 	}
 	if mode != "typewriter" {
 		meta.Typewriter = ""

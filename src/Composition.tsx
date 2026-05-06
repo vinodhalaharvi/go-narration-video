@@ -83,6 +83,9 @@ type RevealEntry = {
 };
 const typewriterReveals: RevealEntry[] = ((meta as any).typewriterReveals as RevealEntry[]) || [];
 
+const vizKind = ((meta as any).viz as string) || '';
+const vizStartSec = ((meta as any).vizStartSec as number) || 0;
+
 type Keyframe = { frame: number; scroll: number };
 
 function buildScrollTimeline(filename: string, fps: number): Keyframe[] {
@@ -133,8 +136,10 @@ const CodePanel: React.FC<{
                       key={`${filename}-${i}`}
                       style={{
                         display: 'flex',
-                        height: LINE_HEIGHT,
-                        alignItems: 'center',
+                        minHeight: LINE_HEIGHT,
+                        alignItems: 'flex-start',
+                        paddingTop: isShort ? 4 : 0,
+                        paddingBottom: isShort ? 4 : 0,
                         background: isActive ? 'rgba(88, 166, 255, 0.15)' : 'transparent',
                         borderLeft: isActive
                           ? '3px solid #58A6FF'
@@ -150,6 +155,8 @@ const CodePanel: React.FC<{
                           fontSize: LINE_NUM_FONT_SIZE,
                           userSelect: 'none',
                           fontFamily: FONT_STACK,
+                          lineHeight: `${LINE_HEIGHT - (isShort ? 8 : 0)}px`,
+                          flexShrink: 0,
                         }}
                       >
                         {lineNum}
@@ -159,8 +166,17 @@ const CodePanel: React.FC<{
                           margin: 0,
                           fontFamily: FONT_STACK,
                           fontSize: CODE_FONT_SIZE,
-                          whiteSpace: 'pre',
+                          whiteSpace: isShort ? 'pre-wrap' : 'pre',
+                          wordBreak: isShort ? 'break-word' : 'normal',
                           color: '#C9D1D9',
+                          flex: 1,
+                          paddingRight: isShort ? 24 : 0,
+                          // Hanging indent: when a line wraps, the continuation
+                          // is offset from the left so it visually reads as a
+                          // continuation rather than a new statement.
+                          paddingLeft: isShort ? 24 : 0,
+                          textIndent: isShort ? -24 : 0,
+                          lineHeight: `${LINE_HEIGHT - (isShort ? 8 : 0)}px`,
                         }}
                       >
                         {line.map((token, key) => (
@@ -313,8 +329,10 @@ const TypewriterPanel: React.FC<{
                       key={`${filename}-tw-${i}`}
                       style={{
                         display: 'flex',
-                        height: LINE_HEIGHT,
-                        alignItems: 'center',
+                        minHeight: LINE_HEIGHT,
+                        alignItems: 'flex-start',
+                        paddingTop: isShort ? 4 : 0,
+                        paddingBottom: isShort ? 4 : 0,
                         background: isLastLine ? 'rgba(88, 166, 255, 0.10)' : 'transparent',
                       }}
                     >
@@ -327,6 +345,8 @@ const TypewriterPanel: React.FC<{
                           fontSize: LINE_NUM_FONT_SIZE,
                           userSelect: 'none',
                           fontFamily: FONT_STACK,
+                          lineHeight: `${LINE_HEIGHT - (isShort ? 8 : 0)}px`,
+                          flexShrink: 0,
                         }}
                       >
                         {lineNum}
@@ -336,8 +356,14 @@ const TypewriterPanel: React.FC<{
                           margin: 0,
                           fontFamily: FONT_STACK,
                           fontSize: CODE_FONT_SIZE,
-                          whiteSpace: 'pre',
+                          whiteSpace: isShort ? 'pre-wrap' : 'pre',
+                          wordBreak: isShort ? 'break-word' : 'normal',
                           color: '#C9D1D9',
+                          flex: 1,
+                          paddingRight: isShort ? 24 : 0,
+                          paddingLeft: isShort ? 24 : 0,
+                          textIndent: isShort ? -24 : 0,
+                          lineHeight: `${LINE_HEIGHT - (isShort ? 8 : 0)}px`,
                         }}
                       >
                         {line.map((token, key) => (
@@ -353,6 +379,204 @@ const TypewriterPanel: React.FC<{
           </Highlight>
         </div>
       </div>
+    </div>
+  );
+};
+
+// ============================================================
+// TreeViz — bottom-pane visualization of the SampleTree.
+// Currently hardcoded to match SampleTree() in fold.go since parsing
+// Go AST in the renderer is overkill.
+// ============================================================
+
+type VizNode = {
+  name: string;
+  num: number;
+  children?: VizNode[];
+  isLeaf?: boolean;
+};
+
+// Mirrors SampleTree() in walkthrough-typewriter/01-fold/fold.go
+const SAMPLE_TREE: VizNode = {
+  name: 'config',
+  num: 0,
+  children: [
+    {
+      name: 'alpha',
+      num: 50,
+      children: [{ name: 'alpha', num: 200, isLeaf: true }],
+    },
+    {
+      name: 'beta',
+      num: 30,
+      children: [{ name: 'beta', num: 80, isLeaf: true }],
+    },
+    { name: 'gamma', num: 150, isLeaf: true },
+  ],
+};
+
+// Layout constants for the tree viz
+const TREE_NODE_RADIUS = 36;
+const TREE_FONT_SIZE = 18;
+
+// Lays out a tree using a simple recursive horizontal centering algorithm.
+// Returns a flat list of {x, y, name, num, isLeaf, parent_id}.
+type LaidOutNode = {
+  id: string;
+  parentId: string | null;
+  x: number;
+  y: number;
+  name: string;
+  num: number;
+  isLeaf: boolean;
+};
+
+function layoutTree(root: VizNode, totalWidth: number, totalHeight: number): LaidOutNode[] {
+  // Compute leaf count for each subtree → that determines horizontal width
+  function leafCount(n: VizNode): number {
+    if (!n.children || n.children.length === 0) return 1;
+    return n.children.reduce((s, c) => s + leafCount(c), 0);
+  }
+
+  function depth(n: VizNode): number {
+    if (!n.children || n.children.length === 0) return 1;
+    return 1 + Math.max(...n.children.map(depth));
+  }
+
+  const totalLeaves = leafCount(root);
+  const treeDepth = depth(root);
+  const levelGap = totalHeight / (treeDepth + 1);
+  const out: LaidOutNode[] = [];
+
+  function place(
+    n: VizNode,
+    leftX: number,
+    rightX: number,
+    level: number,
+    parentId: string | null,
+    idx: number
+  ) {
+    const cx = (leftX + rightX) / 2;
+    const cy = levelGap * (level + 0.5);
+    const id = parentId === null ? 'root' : `${parentId}-${idx}-${n.name}`;
+    out.push({
+      id,
+      parentId,
+      x: cx,
+      y: cy,
+      name: n.name,
+      num: n.num,
+      isLeaf: !n.children || n.children.length === 0,
+    });
+    if (n.children) {
+      let cursor = leftX;
+      n.children.forEach((c, i) => {
+        const w = (leafCount(c) / totalLeaves) * (rightX - leftX);
+        place(c, cursor, cursor + w, level + 1, id, i);
+        cursor += w;
+      });
+    }
+  }
+  place(root, 0, totalWidth, 0, null, 0);
+  return out;
+}
+
+const TreeViz: React.FC<{ currentSec: number; height: number }> = ({ currentSec, height }) => {
+  if (!isShort || vizKind !== 'tree') return null;
+
+  // Fade in over 0.5s starting at vizStartSec
+  const fadeInDur = 0.5;
+  const t = currentSec - vizStartSec;
+  if (t < -0.1) return null; // not yet
+  const opacity = Math.max(0, Math.min(1, t / fadeInDur));
+
+  const width = 1080;
+  const padding = 50;
+  const usableWidth = width - padding * 2;
+  const usableHeight = height - 60;
+  const layout = layoutTree(SAMPLE_TREE, usableWidth, usableHeight);
+
+  return (
+    <div
+      style={{
+        position: 'absolute',
+        left: 0,
+        right: 0,
+        bottom: CAPTION_BAND_HEIGHT,
+        height,
+        background: '#161B22',
+        borderTop: '2px solid #30363D',
+        opacity,
+        zIndex: 5,
+      }}
+    >
+      <div
+        style={{
+          position: 'absolute',
+          top: 8,
+          left: 16,
+          color: '#8B949E',
+          fontFamily: FONT_STACK,
+          fontSize: 16,
+        }}
+      >
+        SampleTree
+      </div>
+      <svg width={width} height={height} style={{ display: 'block' }}>
+        <g transform={`translate(${padding}, 30)`}>
+          {/* Edges first so they're under nodes */}
+          {layout.map((n) => {
+            if (!n.parentId) return null;
+            const parent = layout.find((p) => p.id === n.parentId);
+            if (!parent) return null;
+            return (
+              <line
+                key={`e-${n.id}`}
+                x1={parent.x}
+                y1={parent.y}
+                x2={n.x}
+                y2={n.y}
+                stroke="#30363D"
+                strokeWidth={2}
+              />
+            );
+          })}
+          {/* Nodes */}
+          {layout.map((n) => (
+            <g key={`n-${n.id}`}>
+              <circle
+                cx={n.x}
+                cy={n.y}
+                r={TREE_NODE_RADIUS}
+                fill={n.isLeaf ? '#1F6FEB' : '#30363D'}
+                stroke="#58A6FF"
+                strokeWidth={2}
+              />
+              <text
+                x={n.x}
+                y={n.y - 4}
+                textAnchor="middle"
+                fontFamily={FONT_STACK}
+                fontSize={TREE_FONT_SIZE - 4}
+                fontWeight="bold"
+                fill="#FFFFFF"
+              >
+                {n.name}
+              </text>
+              <text
+                x={n.x}
+                y={n.y + 14}
+                textAnchor="middle"
+                fontFamily={FONT_STACK}
+                fontSize={TREE_FONT_SIZE - 6}
+                fill="#FFA657"
+              >
+                {n.num}
+              </text>
+            </g>
+          ))}
+        </g>
+      </svg>
     </div>
   );
 };
@@ -641,29 +865,41 @@ export const GoWalkthrough: React.FC = () => {
 
       <TabBar activeFile={activeFile} />
 
-      <div style={{ flex: 1, position: 'relative' }}>
-        {fileNames.map((name) =>
-          isTypewriter ? (
-            <TypewriterPanel
-              key={name}
-              filename={name}
-              fullCode={filesMap[name]}
-              currentSec={currentSec}
-              frame={frame}
-              opacity={name === activeFile ? 1 : 0}
-            />
-          ) : (
-            <CodePanel
-              key={name}
-              filename={name}
-              code={filesMap[name]}
-              scrollY={scrollByFile[name] ?? 0}
-              activeLine={name === activeFile ? activeLineByFile[name] : null}
-              opacity={name === activeFile ? 1 : 0}
-            />
-          )
-        )}
-      </div>
+      {(() => {
+        // When tree viz is active, code area shrinks to leave room for viz.
+        const vizHeight = isShort && vizKind === 'tree' ? 600 : 0;
+        const vizCurrentlyVisible = vizKind === 'tree' && currentSec >= vizStartSec - 0.1;
+        const codeAreaStyle: React.CSSProperties = vizCurrentlyVisible
+          ? { height: `calc(100% - ${vizHeight}px - ${CAPTION_BAND_HEIGHT}px - ${HEADER_HEIGHT}px)`, position: 'relative', flexShrink: 0 }
+          : { flex: 1, position: 'relative' };
+        return (
+          <div style={codeAreaStyle}>
+            {fileNames.map((name) =>
+              isTypewriter ? (
+                <TypewriterPanel
+                  key={name}
+                  filename={name}
+                  fullCode={filesMap[name]}
+                  currentSec={currentSec}
+                  frame={frame}
+                  opacity={name === activeFile ? 1 : 0}
+                />
+              ) : (
+                <CodePanel
+                  key={name}
+                  filename={name}
+                  code={filesMap[name]}
+                  scrollY={scrollByFile[name] ?? 0}
+                  activeLine={name === activeFile ? activeLineByFile[name] : null}
+                  opacity={name === activeFile ? 1 : 0}
+                />
+              )
+            )}
+          </div>
+        );
+      })()}
+
+      <TreeViz currentSec={currentSec} height={600} />
 
       <Captions currentSec={currentSec} />
       <TitleOverlay frame={frame} />
