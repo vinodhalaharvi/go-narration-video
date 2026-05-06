@@ -1,11 +1,27 @@
-[[intro icon:🌳 text:Functional Tree, Built Live]]
-[[title:Recursive Fold in Go]]
+[[intro icon:🌳 text:Predicates That Compose]]
+[[title:Functional Tree, Built and Used]]
 [[speed:0.9]]
 [[mode:typewriter granularity:line]]
-[[file:fold.go reveal lines:1-8]] We start with the data. A node has a name, a number, and children that are themselves nodes. Three lines, recursive type.
-[[pause:0.5]]
-[[reveal lines:10-18]] Now the operation. Fold takes a node, an initial value, and a function. It applies the function, then recurses into children. One generic function replaces every walk-this-tree you ever wrote.
-[[pause:0.6]]
-[[reveal lines:20-25]] Predicates are functions from node to bool. Not interfaces. Just functions.
+[[file:fold.go reveal lines:1-10]] We start with the data. A node has a name, a number, and any children that are themselves nodes. Recursive type, three fields.
 [[pause:0.4]]
-[[reveal lines:27-35]] And Find composes them. Fold the tree, accumulate the matches. The shape of the program mirrors the shape of the data.
+[[reveal lines:12-21]] Fold accumulates a value over the tree. One generic function. Replaces every walk-this-tree you ever wrote.
+[[pause:0.5]]
+[[reveal lines:23-23]] Now the key idea. A predicate is just a function from node to bool.
+[[pause:0.4]]
+[[reveal lines:29-37]] Primitives. Match by name. Match by a minimum number. Check if a node is a leaf. One line each.
+[[pause:0.5]]
+[[reveal lines:43-45]] Combinators. And. Or. Not. Three lines, every Boolean query.
+[[pause:0.4]]
+[[reveal lines:48-56]] Find ties it together. Fold the tree, append every match.
+[[pause:0.6]]
+[[reveal lines:69-79]] Now let us see it work. Here is a sample tree. Three branches. Some leaves. A mix of names and numbers.
+[[pause:0.5]]
+[[reveal lines:83-87]] Query one. Find by name. Two alpha nodes anywhere in the tree. Returns two.
+[[pause:0.4]]
+[[reveal lines:89-92]] Query two. Compose with And. Big leaves only. Returns two.
+[[pause:0.4]]
+[[reveal lines:94-97]] Query three. Compose with Or. Alpha or beta. Returns four.
+[[pause:0.4]]
+[[reveal lines:99-102]] Query four. Compose with Not. Branches only. Returns three.
+[[pause:0.5]]
+[[reveal lines:104-108]] Drop Find entirely. Use Fold directly. Sum all the numbers. Returns five hundred and ten. The same Fold powers every single query above.
