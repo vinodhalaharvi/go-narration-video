@@ -1,0 +1,33 @@
+[[intro icon:🌐 text:Web Framework in 50 Lines]]
+[[title:Functional HTTP in Go]]
+[[speed:0.9]]
+[[mode:typewriter granularity:line]]
+[[panel:output style:terminal]]
+[[outro icon:🚀 text:Subscribe for Pt 2: No Mocks]]
+We are about to build a complete web framework using only stdlib http. Functions as handlers, functions as middleware, composed with one combinator. Forty-five lines, no dependencies.
+[[pause:0.5]]
+[[file:mw.go reveal lines:9-22]] First, the lead from the standard library. The Handler interface has one method. HandlerFunc is a function type. It satisfies the interface by calling itself. A closure that implements an interface. This pattern is the entire trick. We will follow it.
+[[pause:0.7]]
+[[reveal lines:23-23]] Our Handler is just an alias for the stdlib type. Drops the noise.
+[[pause:0.4]]
+[[reveal lines:29-31]] Two example handlers. Hello says hello. Plain function value.
+[[pause:0.4]]
+[[reveal lines:33-40]] Another handler. It reads a user from the request context and writes it back. The context key is unexported, classic Go.
+[[pause:0.5]]
+[[reveal lines:46-46]] Now the composition. Middleware is a function from Handler to Handler. That is the entire abstraction.
+[[pause:0.6]]
+[[reveal lines:50-60]] Here is one middleware. Read the token. If wrong, return four hundred one. Otherwise put the user on context and call next. No struct. No interface beyond the alias. Just a closure wrapping a closure.
+[[pause:0.7]]
+[[reveal lines:66-73]] Chain composes middleware right to left. Apply each one to wrap the handler. Now you can stack as many as you like.
+[[pause:0.5]]
+[[reveal lines:79-86]] Wire it up. Mount Hello as public. Wrap WhoAmI through Chain of RequireAuth. Run the server. That is everything.
+[[output text:$ curl localhost:8080/hello]] Quick demo.
+[[output text:hello]]
+[[output text:]]
+[[output text:$ curl localhost:8080/me]] Without a token, get rejected.
+[[output text:unauthorized]]
+[[output text:]]
+[[output text:$ curl -H "Authorization: Bearer secret" localhost:8080/me]] With the right header, see the user.
+[[output text:alice]]
+[[pause:0.4]]
+And every line above can be tested without a single mock. Just call the handler with httptest. That is the next video.

@@ -49,10 +49,26 @@ type Meta struct {
 	Viz         string  `json:"viz"`
 	VizStartSec float64 `json:"vizStartSec"`
 
+	// Output panel: a stream of text lines that appear synced to narration.
+	// Reusable across video types (terminal output, test results, log lines).
+	OutputStyle string        `json:"outputStyle"` // "" | "terminal" | "test" | "log"
+	OutputLines []OutputLine  `json:"outputLines"`
+
 	// IntroUntilSec is when the intro card finishes (and code typing begins).
 	// In typewriter mode, this is the start time of the first reveal — any
 	// narration before that plays over the intro card.
 	IntroUntilSec float64 `json:"introUntilSec"`
+
+	// Outro card: shown fullscreen at the end (mirror of intro card).
+	OutroIcon     string  `json:"outroIcon"`
+	OutroText     string  `json:"outroText"`
+	OutroStartSec float64 `json:"outroStartSec"` // when outro card fades in
+}
+
+// OutputLine is one line in the output panel, appearing at AtSec.
+type OutputLine struct {
+	Text  string  `json:"text"`
+	AtSec float64 `json:"atSec"`
 }
 
 // RevealEntry describes a typewriter reveal beat.
@@ -271,6 +287,89 @@ func extractViz(script string) (kind string, startLine int, cleaned string) {
 	}
 	cleaned = vizRe.ReplaceAllString(script, "")
 	return kind, startLine, cleaned
+}
+
+// extractOutputPanel pulls a [[panel:output style:terminal]] directive.
+// Returns style="" if not declared. Directive is consumed.
+func extractOutputPanel(script string) (style, cleaned string) {
+	panelRe := regexp.MustCompile(`\[\[panel:output(?:\s+style:(\w+))?\]\]\s*\n?`)
+	m := panelRe.FindStringSubmatch(script)
+	if m == nil {
+		return "", script
+	}
+	style = m[1]
+	if style == "" {
+		style = "terminal" // sensible default
+	}
+	cleaned = panelRe.ReplaceAllString(script, "")
+	return style, cleaned
+}
+
+// outputDirective is a parsed [[output text:...]] directive in script order.
+// Each one becomes a line that appears in the output panel at the time of
+// the narration anchor that follows it.
+type outputDirective struct {
+	text   string
+	anchor string // first 4 words of narration after the directive
+}
+
+// extractOutputDirectives finds [[output text:...]] directives, replaces them
+// in script with their narration anchor (so anchors still match correctly),
+// and returns the list in script order.
+//
+// The directive's narration text comes from what FOLLOWS it (same convention
+// as [[reveal lines:...]]). Each output line appears synced to that anchor.
+func extractOutputDirectives(script string) (directives []outputDirective, cleaned string) {
+	// Match: [[output text:...]] (text is until ]] or end of line)
+	outputRe := regexp.MustCompile(`\[\[output\s+text:([^\]]*)\]\]`)
+	parts := outputRe.Split(script, -1)
+	matches := outputRe.FindAllStringSubmatch(script, -1)
+
+	if len(matches) == 0 {
+		return nil, script
+	}
+
+	for i, m := range matches {
+		text := strings.TrimSpace(m[1])
+		// The narration anchor is the first 4 words of what follows this directive
+		// (parts[i+1] is the text after match i).
+		nextNarration := ""
+		if i+1 < len(parts) {
+			nextNarration = strings.TrimSpace(parts[i+1])
+		}
+		anchor := firstNWords(nextNarration, 4)
+		directives = append(directives, outputDirective{
+			text:   text,
+			anchor: anchor,
+		})
+	}
+
+	cleaned = outputRe.ReplaceAllString(script, "")
+	return directives, cleaned
+}
+
+// extractOutro pulls a [[outro icon:X text:Y]] directive (mirrors intro).
+// Returns icon="", text="" if not present.
+func extractOutro(script string) (icon, text, cleaned string) {
+	outroRe := regexp.MustCompile(`\[\[outro\s+([^\]]+)\]\]\s*\n?`)
+	m := outroRe.FindStringSubmatch(script)
+	if m == nil {
+		return "", "", script
+	}
+	body := m[1]
+
+	iconRe := regexp.MustCompile(`icon:(\S+)`)
+	if im := iconRe.FindStringSubmatch(body); im != nil {
+		icon = strings.TrimSpace(im[1])
+	}
+
+	textRe := regexp.MustCompile(`text:(.+?)(?:\s+icon:|$)`)
+	if tm := textRe.FindStringSubmatch(body); tm != nil {
+		text = strings.TrimSpace(tm[1])
+	}
+
+	cleaned = outroRe.ReplaceAllString(script, "")
+	return icon, text, cleaned
 }
 
 // pause marks an inserted silence between narration segments.
@@ -492,6 +591,16 @@ func main() {
 
 	// Optional bottom-panel visualization (e.g. [[viz:tree start-line:69]])
 	vizKind, vizStartLine, rawScript := extractViz(rawScript)
+
+	// Optional bottom-panel output (terminal-style text appearing on cue)
+	outputStyle, rawScript := extractOutputPanel(rawScript)
+	outputDirectives, rawScript := extractOutputDirectives(rawScript)
+	if outputStyle != "" {
+		fmt.Printf("ℹ output panel: style=%s, %d line(s)\n", outputStyle, len(outputDirectives))
+	}
+
+	// Optional outro card (mirror of intro)
+	outroIcon, outroText, rawScript := extractOutro(rawScript)
 
 	// Typewriter mode: switches the rendering model entirely.
 	// Reveals replace markers as the source of narration beats.
@@ -814,6 +923,52 @@ func main() {
 		}
 	}
 
+	// Compute output panel line timings — each line appears at its anchor time.
+	var outputLines []OutputLine
+	if outputStyle != "" && len(outputDirectives) > 0 {
+		searchFrom := 0
+		for _, d := range outputDirectives {
+			var at float64 = -1
+			if d.anchor != "" {
+				at, _ = findPhraseStart(words, d.anchor, searchFrom)
+				if at >= 0 {
+					_, searchFrom = findPhraseStart(words, d.anchor, searchFrom)
+				}
+			}
+			if at < 0 {
+				// Empty anchor (output line following another output line) or
+				// failed to match — appear shortly after the previous line.
+				if len(outputLines) > 0 {
+					at = outputLines[len(outputLines)-1].AtSec + 0.35
+				} else {
+					at = introUntilSec
+				}
+			}
+			outputLines = append(outputLines, OutputLine{Text: d.text, AtSec: at})
+		}
+	}
+
+	// Compute outro start time: end of last narration beat (last typewriter
+	// reveal's endSec, or last schedule entry, plus a small buffer).
+	var outroStartSec float64
+	if outroText != "" {
+		if len(typewriterReveals) > 0 {
+			outroStartSec = typewriterReveals[len(typewriterReveals)-1].EndSec
+		} else if len(schedule) > 0 {
+			// Highlight mode: use last schedule entry + a buffer
+			last := schedule[len(schedule)-1]
+			outroStartSec = last.StartSec + 2.0
+		}
+		// Cap so outro doesn't start past total duration
+		totalDur := transcriptResp.Duration + 0.5
+		if outroStartSec > totalDur-0.5 {
+			outroStartSec = totalDur - 0.5
+		}
+		if outroStartSec < 0 {
+			outroStartSec = 0
+		}
+	}
+
 	meta := Meta{
 		DurationSec:       transcriptResp.Duration + 0.5,
 		Format:            format,
@@ -824,7 +979,12 @@ func main() {
 		TypewriterReveals: typewriterReveals,
 		Viz:               vizKind,
 		VizStartSec:       vizStartSec,
+		OutputStyle:       outputStyle,
+		OutputLines:       outputLines,
 		IntroUntilSec:     introUntilSec,
+		OutroIcon:         outroIcon,
+		OutroText:         outroText,
+		OutroStartSec:     outroStartSec,
 	}
 	if mode != "typewriter" {
 		meta.Typewriter = ""
@@ -842,6 +1002,15 @@ func main() {
 		for _, r := range typewriterReveals {
 			fmt.Printf("   %s:%d-%d at %.2f-%.2fs\n", r.File, r.LineFrom, r.LineTo, r.StartSec, r.EndSec)
 		}
+	}
+	if len(outputLines) > 0 {
+		fmt.Printf("✓ output lines (%s):\n", outputStyle)
+		for _, ol := range outputLines {
+			fmt.Printf("   %.2fs: %s\n", ol.AtSec, ol.Text)
+		}
+	}
+	if outroText != "" {
+		fmt.Printf("✓ outro at %.2fs: %s %q\n", outroStartSec, outroIcon, outroText)
 	}
 	fmt.Printf("✓ duration: %.2fs (video will end here)\n", meta.DurationSec)
 	fmt.Printf("✓ format: %s", meta.Format)

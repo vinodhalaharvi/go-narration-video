@@ -86,6 +86,14 @@ const typewriterReveals: RevealEntry[] = ((meta as any).typewriterReveals as Rev
 const vizKind = ((meta as any).viz as string) || '';
 const vizStartSec = ((meta as any).vizStartSec as number) || 0;
 
+type OutputLine = { text: string; atSec: number };
+const outputStyle = ((meta as any).outputStyle as string) || '';
+const outputLines: OutputLine[] = ((meta as any).outputLines as OutputLine[]) || [];
+
+const outroIcon = ((meta as any).outroIcon as string) || '';
+const outroText = ((meta as any).outroText as string) || '';
+const outroStartSec = ((meta as any).outroStartSec as number) || 0;
+
 type Keyframe = { frame: number; scroll: number };
 
 function buildScrollTimeline(filename: string, fps: number): Keyframe[] {
@@ -581,6 +589,187 @@ const TreeViz: React.FC<{ currentSec: number; height: number }> = ({ currentSec,
   );
 };
 
+// ============================================================
+// OutputPanel — terminal-style text appearing line-by-line synced
+// to narration. Reusable for curl output, test results, log lines.
+// Shorts only.
+// ============================================================
+
+type OutputStyleProps = {
+  bg: string;
+  fg: string;
+  border: string;
+  prompt: string; // optional prefix prepended to each line (rare)
+  fontSize: number;
+};
+
+function styleForOutput(kind: string): OutputStyleProps {
+  switch (kind) {
+    case 'test':
+      return { bg: '#0D1117', fg: '#7CE38B', border: '#238636', prompt: '', fontSize: 26 };
+    case 'log':
+      return { bg: '#1C1C1C', fg: '#C9D1D9', border: '#484F58', prompt: '', fontSize: 24 };
+    case 'terminal':
+    default:
+      return { bg: '#0D1117', fg: '#7EE787', border: '#1F6FEB', prompt: '', fontSize: 28 };
+  }
+}
+
+// Color a single output line based on its content (for `test` style only).
+function colorizeLine(text: string, style: OutputStyleProps): string {
+  if (text.startsWith('FAIL') || text.includes('--- FAIL')) return '#F85149';
+  if (text.startsWith('PASS') || text.startsWith('ok ') || text.includes('--- PASS')) return '#7CE38B';
+  return style.fg;
+}
+
+const OutputPanel: React.FC<{ currentSec: number; height: number }> = ({ currentSec, height }) => {
+  if (!isShort || !outputStyle) return null;
+
+  const style = styleForOutput(outputStyle);
+
+  // Determine which lines are visible at currentSec
+  const visible = outputLines.filter((l) => currentSec >= l.atSec - 0.05);
+  if (visible.length === 0 && currentSec < (outputLines[0]?.atSec ?? Infinity) - 0.5) {
+    // Panel is empty and first line hasn't approached yet — don't render anything
+    // (keeps the panel hidden until needed)
+    return null;
+  }
+
+  // Fade in 0.4s before first line appears
+  const firstAt = outputLines[0]?.atSec ?? 0;
+  const fadeT = currentSec - (firstAt - 0.4);
+  const opacity = Math.max(0, Math.min(1, fadeT / 0.4));
+
+  // Auto-scroll: keep latest lines visible. Simple approach — only show last N lines.
+  const maxLines = Math.floor((height - 60) / (style.fontSize + 12));
+  const shown = visible.slice(-maxLines);
+
+  return (
+    <div
+      style={{
+        position: 'absolute',
+        left: 0,
+        right: 0,
+        bottom: CAPTION_BAND_HEIGHT,
+        height,
+        background: style.bg,
+        borderTop: `2px solid ${style.border}`,
+        opacity,
+        zIndex: 5,
+        padding: '24px 32px',
+        boxSizing: 'border-box',
+        overflow: 'hidden',
+      }}
+    >
+      <div
+        style={{
+          color: '#8B949E',
+          fontFamily: FONT_STACK,
+          fontSize: 16,
+          marginBottom: 12,
+        }}
+      >
+        {outputStyle === 'terminal' ? '$ terminal' : outputStyle === 'test' ? 'go test' : 'output'}
+      </div>
+      <div
+        style={{
+          fontFamily: FONT_STACK,
+          fontSize: style.fontSize,
+          lineHeight: `${style.fontSize + 12}px`,
+          whiteSpace: 'pre-wrap',
+          wordBreak: 'break-word',
+        }}
+      >
+        {shown.map((line, i) => (
+          <div
+            key={i}
+            style={{
+              color: colorizeLine(line.text, style),
+              opacity: 1,
+            }}
+          >
+            {style.prompt}{line.text || '\u00A0'}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+};
+
+// ============================================================
+// OutroCard — fullscreen card at the end (mirrors IntroCard).
+// ============================================================
+const OutroCard: React.FC<{ currentSec: number; frame: number }> = ({ currentSec, frame }) => {
+  if (!isShort) return null;
+  if (!outroIcon && !outroText) return null;
+  if (currentSec < outroStartSec - 0.1) return null;
+
+  // Hold for 3.5s, with 0.4s fade in and 0.4s fade out at the end
+  const holdDur = 3.5;
+  const fadeIn = 0.4;
+  const fadeOut = 0.4;
+  const t = currentSec - outroStartSec;
+  if (t > holdDur) return null;
+
+  let opacity = 1;
+  if (t < fadeIn) {
+    opacity = t / fadeIn;
+  } else if (t > holdDur - fadeOut) {
+    opacity = (holdDur - t) / fadeOut;
+  }
+
+  // Subtle scale in for visual life
+  const scale = 0.95 + Math.min(0.07, t * 0.04);
+
+  return (
+    <div
+      style={{
+        position: 'absolute',
+        inset: 0,
+        background: 'linear-gradient(135deg, #0D1117 0%, #1C2128 50%, #0D1117 100%)',
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        justifyContent: 'center',
+        opacity,
+        zIndex: 100,
+        pointerEvents: 'none',
+        transform: `scale(${scale})`,
+      }}
+    >
+      {outroIcon && (
+        <div
+          style={{
+            fontSize: 280,
+            lineHeight: 1,
+            marginBottom: 40,
+            filter: 'drop-shadow(0 12px 24px rgba(88, 166, 255, 0.4))',
+          }}
+        >
+          {outroIcon}
+        </div>
+      )}
+      {outroText && (
+        <div
+          style={{
+            color: '#58A6FF',
+            fontSize: 80,
+            fontWeight: 900,
+            fontFamily: 'system-ui, -apple-system, sans-serif',
+            textAlign: 'center',
+            lineHeight: 1.15,
+            padding: '0 60px',
+            letterSpacing: -1,
+            textShadow: '0 4px 24px rgba(88, 166, 255, 0.5), 0 2px 8px rgba(0, 0, 0, 0.8)',
+          }}
+        >
+          {outroText}
+        </div>
+      )}
+    </div>
+  );
+};
+
 const TabBar: React.FC<{ activeFile: string }> = ({ activeFile }) => {
   if (fileNames.length <= 1 || isShort) return null;
   return (
@@ -893,11 +1082,14 @@ export const GoWalkthrough: React.FC = () => {
       <TabBar activeFile={activeFile} />
 
       {(() => {
-        // When tree viz is active, code area shrinks to leave room for viz.
-        const vizHeight = isShort && vizKind === 'tree' ? 600 : 0;
-        const vizCurrentlyVisible = vizKind === 'tree' && currentSec >= vizStartSec - 0.1;
-        const codeAreaStyle: React.CSSProperties = vizCurrentlyVisible
-          ? { height: `calc(100% - ${vizHeight}px - ${CAPTION_BAND_HEIGHT}px - ${HEADER_HEIGHT}px)`, position: 'relative', flexShrink: 0 }
+        // When tree viz or output panel is active, code area shrinks to leave room.
+        // Both bottom panels use the same 600px region (one or the other, not both).
+        const bottomPanelHeight = (isShort && (vizKind === 'tree' || outputStyle !== '')) ? 600 : 0;
+        const bottomPanelVisible =
+          (vizKind === 'tree' && currentSec >= vizStartSec - 0.1) ||
+          (outputStyle !== '' && outputLines.length > 0 && currentSec >= (outputLines[0]?.atSec ?? Infinity) - 0.4);
+        const codeAreaStyle: React.CSSProperties = bottomPanelVisible
+          ? { height: `calc(100% - ${bottomPanelHeight}px - ${CAPTION_BAND_HEIGHT}px - ${HEADER_HEIGHT}px)`, position: 'relative', flexShrink: 0 }
           : { flex: 1, position: 'relative' };
         return (
           <div style={codeAreaStyle}>
@@ -927,10 +1119,12 @@ export const GoWalkthrough: React.FC = () => {
       })()}
 
       <TreeViz currentSec={currentSec} height={600} />
+      <OutputPanel currentSec={currentSec} height={600} />
 
       <Captions currentSec={currentSec} />
       <TitleOverlay frame={frame} />
       <IntroCard frame={frame} />
+      <OutroCard currentSec={currentSec} frame={frame} />
 
       <Audio src={staticFile('narration.mp3')} />
     </AbsoluteFill>
