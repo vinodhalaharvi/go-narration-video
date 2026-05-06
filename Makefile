@@ -81,9 +81,9 @@ check:  ## Verify environment is set up correctly
 # ========================================
 # Pipeline
 # ========================================
-audio: check  ## Generate narration MP3 + schedule + codeFiles from script. Optional: MODE=typewriter|off GRANULARITY=line|word
+audio: check  ## Generate narration MP3 + schedule + codeFiles from script. Optional: MODE=typewriter|off GRANULARITY=line|word SPEED=0.85
 	@echo "$(CYAN)→ Running Go pipeline (TTS + Whisper + schedule)...$(RESET)"
-	@MODE="$(MODE)" GRANULARITY="$(GRANULARITY)" go run ./cmd/build
+	@MODE="$(MODE)" GRANULARITY="$(GRANULARITY)" SPEED="$(SPEED)" go run ./cmd/build
 
 render: init  ## Render MP4 (auto-generates audio if missing)
 	@if [ ! -f $(AUDIO) ]; then \
@@ -97,9 +97,9 @@ render: init  ## Render MP4 (auto-generates audio if missing)
 
 build: audio render  ## Full pipeline: audio + schedule + render (long-form 1920x1080)
 
-short:  ## Build a vertical short (1080x1920 with baked captions). Optional: MODE=typewriter|off GRANULARITY=line|word
+short:  ## Build a vertical short (1080x1920 with baked captions). Optional: MODE=typewriter|off GRANULARITY=line|word SPEED=0.85
 	@echo "$(CYAN)→ Generating shorts-mode audio + schedule...$(RESET)"
-	@SHORT=1 MODE="$(MODE)" GRANULARITY="$(GRANULARITY)" $(MAKE) audio
+	@SHORT=1 MODE="$(MODE)" GRANULARITY="$(GRANULARITY)" SPEED="$(SPEED)" $(MAKE) audio
 	@echo "$(CYAN)→ Rendering shorts-mode video...$(RESET)"
 	@rm -rf node_modules/.cache $(OUTPUT)
 	@npx remotion render $(COMPOSITION) $(OUTPUT)
@@ -141,9 +141,9 @@ voices:  ## List available voice options
 	@echo "  make rebuild-audio VOICE=sage   # regenerate just audio without rebuilding video"
 	@echo ""
 
-rebuild-audio: check  ## Regenerate audio with a different voice (keeps existing render setup)
-	@echo "$(CYAN)→ Regenerating audio (VOICE=$$VOICE PROVIDER=$$PROVIDER)...$(RESET)"
-	@go run ./cmd/build
+rebuild-audio: check  ## Regenerate audio with a different voice/speed (keeps existing render setup)
+	@echo "$(CYAN)→ Regenerating audio (VOICE=$$VOICE PROVIDER=$$PROVIDER SPEED=$$SPEED)...$(RESET)"
+	@MODE="$(MODE)" GRANULARITY="$(GRANULARITY)" SPEED="$(SPEED)" go run ./cmd/build
 	@echo "$(GREEN)✓ Audio regenerated. Run 'make render' to update video.$(RESET)"
 
 # ========================================

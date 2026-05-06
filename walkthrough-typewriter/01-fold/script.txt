@@ -1,7 +1,11 @@
 [[intro icon:🌳 text:Functional Tree, Built Live]]
 [[title:Recursive Fold in Go]]
+[[speed:0.9]]
 [[mode:typewriter granularity:line]]
 [[file:fold.go reveal lines:1-8]] We start with the data. A node has a name, a number, and children that are themselves nodes. Three lines, recursive type.
+[[pause:0.5]]
 [[reveal lines:10-18]] Now the operation. Fold takes a node, an initial value, and a function. It applies the function, then recurses into children. One generic function replaces every walk-this-tree you ever wrote.
+[[pause:0.6]]
 [[reveal lines:20-25]] Predicates are functions from node to bool. Not interfaces. Just functions.
+[[pause:0.4]]
 [[reveal lines:27-35]] And Find composes them. Fold the tree, accumulate the matches. The shape of the program mirrors the shape of the data.

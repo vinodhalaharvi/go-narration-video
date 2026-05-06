@@ -101,6 +101,9 @@ func findPhraseStart(words []Word, phrase string, fromIdx int) (float64, int) {
 }
 
 func firstNWords(s string, n int) string {
+	// Strip pause sentinels — they survive into narration text but should
+	// never become part of an anchor (Whisper won't transcribe silence).
+	s = regexp.MustCompile(`‖PAUSE\d+‖`).ReplaceAllString(s, "")
 	fields := strings.Fields(s)
 	if len(fields) > n {
 		fields = fields[:n]
@@ -197,6 +200,73 @@ func extractMode(script string) (mode, granularity, cleaned string) {
 	}
 	cleaned = modeRe.ReplaceAllString(script, "")
 	return mode, granularity, cleaned
+}
+
+// extractSpeed pulls a [[speed:N]] directive (anywhere in script).
+// Returns 0 if not present (caller treats as "use default 1.0").
+// Range is clamped to OpenAI's supported 0.25–4.0.
+func extractSpeed(script string) (speed float64, cleaned string) {
+	speedRe := regexp.MustCompile(`\[\[speed:([0-9]*\.?[0-9]+)\]\]\s*\n?`)
+	m := speedRe.FindStringSubmatch(script)
+	if m == nil {
+		return 0, script
+	}
+	fmt.Sscanf(m[1], "%f", &speed)
+	if speed < 0.25 {
+		speed = 0.25
+	} else if speed > 4.0 {
+		speed = 4.0
+	}
+	cleaned = speedRe.ReplaceAllString(script, "")
+	return speed, cleaned
+}
+
+// pause marks an inserted silence between narration segments.
+// Lives in the script as [[pause:N]] (seconds). The pipeline replaces the
+// directive with a placeholder, generates TTS for the surrounding chunks,
+// and stitches them with N seconds of silence in between.
+type pauseDirective struct {
+	atIndex  int     // position in the segment stream (after how many segments)
+	duration float64 // seconds of silence
+}
+
+// extractPauses finds [[pause:N]] directives. They don't survive into the
+// narration text — they are replaced with a marker token that we use to
+// chunk the script for TTS, then we splice silence between chunks.
+//
+// Returns the cleaned script (with directives replaced by a sentinel) and
+// the list of pause durations in script order.
+//
+// We use sentinel tokens like "‖PAUSE0‖", "‖PAUSE1‖" that are very unlikely
+// to appear in any real narration text.
+func extractPauses(script string) (cleaned string, durations []float64) {
+	pauseRe := regexp.MustCompile(`\[\[pause:([0-9]*\.?[0-9]+)\]\]\s*\n?`)
+	matches := pauseRe.FindAllStringSubmatchIndex(script, -1)
+	if len(matches) == 0 {
+		return script, nil
+	}
+	var b strings.Builder
+	last := 0
+	idx := 0
+	for _, m := range matches {
+		// m[0]:m[1] = full match, m[2]:m[3] = capture group
+		b.WriteString(script[last:m[0]])
+		var d float64
+		fmt.Sscanf(script[m[2]:m[3]], "%f", &d)
+		if d < 0.05 {
+			d = 0.05
+		} else if d > 10 {
+			d = 10
+		}
+		durations = append(durations, d)
+		// Sentinel that won't be spoken or interpreted as a marker.
+		// We'll split on this later.
+		fmt.Fprintf(&b, " ‖PAUSE%d‖ ", idx)
+		idx++
+		last = m[1]
+	}
+	b.WriteString(script[last:])
+	return b.String(), durations
 }
 
 // reveal is a parsed [[reveal lines:N-M]] directive in typewriter mode.
@@ -332,6 +402,35 @@ func main() {
 	title, rawScript := extractTitle(rawScript)
 	introIcon, introText, rawScript := extractIntro(rawScript)
 
+	// Speed: [[speed:0.85]] in script, or SPEED env override.
+	speed, rawScript := extractSpeed(rawScript)
+	if envSpeed := strings.TrimSpace(os.Getenv("SPEED")); envSpeed != "" {
+		var s float64
+		if _, err := fmt.Sscanf(envSpeed, "%f", &s); err == nil && s > 0 {
+			if s < 0.25 {
+				s = 0.25
+			} else if s > 4.0 {
+				s = 4.0
+			}
+			speed = s
+			fmt.Printf("ℹ SPEED=%.2f env override\n", speed)
+		} else {
+			log.Fatalf("invalid SPEED=%q (numeric, 0.25–4.0)", envSpeed)
+		}
+	}
+	if speed > 0 && speed != 1.0 {
+		fmt.Printf("ℹ narration speed: %.2fx\n", speed)
+	}
+	if speed == 0 {
+		speed = 1.0 // default
+	}
+
+	// Pauses: [[pause:0.5]] inserts silence between narration chunks.
+	rawScript, pauseDurations := extractPauses(rawScript)
+	if len(pauseDurations) > 0 {
+		fmt.Printf("ℹ %d pause(s) requested\n", len(pauseDurations))
+	}
+
 	// Typewriter mode: switches the rendering model entirely.
 	// Reveals replace markers as the source of narration beats.
 	mode, granularity, rawScript := extractMode(rawScript)
@@ -413,19 +512,27 @@ func main() {
 	}
 	fmt.Printf("✓ using TTS: %s\n", tts.Name())
 
-	audioStream, err := tts.Synthesize(context.Background(), cleanText)
-	if err != nil {
-		log.Fatalf("TTS request failed: %v", err)
-	}
-	defer audioStream.Close()
-
 	os.MkdirAll("public", 0755)
-	out, err := os.Create("public/narration.mp3")
-	if err != nil {
-		log.Fatal(err)
+
+	// If pauses are present, split cleanText on the sentinels, synthesize each
+	// chunk, and stitch with silence in between.
+	if len(pauseDurations) > 0 {
+		if err := synthesizeWithPauses(tts, cleanText, pauseDurations, speed, "public/narration.mp3"); err != nil {
+			log.Fatalf("TTS with pauses failed: %v", err)
+		}
+	} else {
+		audioStream, err := tts.Synthesize(context.Background(), cleanText, speed)
+		if err != nil {
+			log.Fatalf("TTS request failed: %v", err)
+		}
+		defer audioStream.Close()
+		out, err := os.Create("public/narration.mp3")
+		if err != nil {
+			log.Fatal(err)
+		}
+		io.Copy(out, audioStream)
+		out.Close()
 	}
-	io.Copy(out, audioStream)
-	out.Close()
 	fmt.Println("✓ audio generated")
 
 	// --- Transcribe (always uses OpenAI Whisper for word timestamps) ---

@@ -14,8 +14,9 @@ import (
 )
 
 // TTS produces an MP3 stream from text.
+// speed=1.0 is normal; range typically 0.5–2.0. Providers may ignore if unsupported.
 type TTS interface {
-	Synthesize(ctx context.Context, text string) (io.ReadCloser, error)
+	Synthesize(ctx context.Context, text string, speed float64) (io.ReadCloser, error)
 	Name() string
 }
 
@@ -66,11 +67,15 @@ func (t *openaiTTS) Name() string {
 	return fmt.Sprintf("openai/%s/%s", t.model, t.voice)
 }
 
-func (t *openaiTTS) Synthesize(ctx context.Context, text string) (io.ReadCloser, error) {
+func (t *openaiTTS) Synthesize(ctx context.Context, text string, speed float64) (io.ReadCloser, error) {
+	if speed <= 0 {
+		speed = 1.0
+	}
 	resp, err := t.client.CreateSpeech(ctx, openai.CreateSpeechRequest{
 		Model: t.model,
 		Input: text,
 		Voice: t.voice,
+		Speed: speed,
 	})
 	if err != nil {
 		return nil, err
@@ -136,8 +141,15 @@ func (t *elevenLabsTTS) Name() string {
 	return fmt.Sprintf("elevenlabs/%s/%s", t.modelID, t.voice)
 }
 
-func (t *elevenLabsTTS) Synthesize(ctx context.Context, text string) (io.ReadCloser, error) {
+func (t *elevenLabsTTS) Synthesize(ctx context.Context, text string, speed float64) (io.ReadCloser, error) {
 	url := fmt.Sprintf("https://api.elevenlabs.io/v1/text-to-speech/%s", t.voiceID)
+
+	// ElevenLabs doesn't expose a direct speed param across all models.
+	// We log a warning if speed != 1.0 and ignore it for now. Switch to
+	// OpenAI for speed control.
+	if speed > 0 && speed != 1.0 {
+		fmt.Fprintf(os.Stderr, "ℹ ElevenLabs ignores speed=%.2f (not supported on current model). Use PROVIDER=openai for speed control.\n", speed)
+	}
 
 	body, _ := json.Marshal(map[string]any{
 		"text":     text,
